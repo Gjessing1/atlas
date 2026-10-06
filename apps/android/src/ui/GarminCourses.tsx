@@ -12,6 +12,7 @@ import {
 } from '@atlas/core';
 import { useEffect, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { FilterMenu } from './FilterMenu';
 import { theme } from './theme';
 
 /**
@@ -75,23 +76,19 @@ export function GarminCourses({
         </Pressable>
       </View>
       {sports.length > 1 ? (
-        <View style={styles.chips} accessibilityRole="radiogroup">
-          {[{ sport: null as string | null, count: courses!.length }, ...sports].map((item) => {
-            const on = sport === item.sport;
-            return (
-              <Pressable
-                key={item.sport ?? 'all'}
-                style={[styles.chip, on && styles.chipOn]}
-                onPress={() => setSport(item.sport)}
-                accessibilityRole="radio"
-                accessibilityState={{ checked: on }}
-              >
-                <Text style={[styles.chipText, on && styles.chipTextOn]}>
-                  {item.sport ?? 'All'} <Text style={styles.count}>{item.count}</Text>
-                </Text>
-              </Pressable>
-            );
-          })}
+        <View style={styles.filterRow}>
+          <FilterMenu
+            label="Sport"
+            allLabel="All sports"
+            value={sport}
+            options={sports.map((item) => ({
+              key: item.sport,
+              label: item.sport,
+              count: item.count,
+            }))}
+            onChange={setSport}
+            testID="garmin-course-sport"
+          />
         </View>
       ) : null}
       {courses && courses.length === 0 ? (
@@ -123,11 +120,10 @@ export function GarminCourses({
                   <Text style={styles.badge}>{savedTrack ? 'In Atlas' : 'Garmin only'}</Text>
                 </View>
                 <Text style={styles.line}>{garminCourseLine(course)}</Text>
-                <Text style={styles.line}>
-                  {delivery
-                    ? garminDeliveryLine(course, delivery)
-                    : 'No watch send recorded in Atlas'}
-                </Text>
+                {/* Only a send says something; "never sent" on every row was noise. */}
+                {delivery ? (
+                  <Text style={styles.line}>{garminDeliveryLine(course, delivery)}</Text>
+                ) : null}
               </Pressable>
               {expanded ? (
                 <View style={styles.actions}>
@@ -334,6 +330,7 @@ const styles = StyleSheet.create({
   muted: { fontSize: 13, color: theme.textMuted, marginTop: 6, opacity: 0.75 },
   error: { fontSize: 13, color: theme.danger, marginTop: 6 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 },
+  filterRow: { flexDirection: 'row', marginBottom: 8 },
   chip: {
     minHeight: 36,
     justifyContent: 'center',

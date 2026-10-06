@@ -77,8 +77,11 @@ What remains:
 
       - **Views over the same records:** Folders, Places, Routes & courses, Activities and Garmin now
         exist on both clients. Garmin has remote-only courses, imported activities and Explore GPX
-        locations. Activity sport/year filters and show-matching-tracks action also exist. Still
-        needed: plan-profile sport for Atlas routes, and sort by distance or proximity to the map view.
+        locations. Activity sport/year filters and show-matching-tracks action also exist; on
+        Android (v0.253.0) the views are a fixed tab bar, the filters are Sport ▾ / Year ▾ menus,
+        rows are one line each, and Garmin is a status pane (activities, locations, courses) rather
+        than a second activity list. Still needed: the same on web, plan-profile sport for Atlas
+        routes, and sort by distance or proximity to the map view.
       - **Rows that answer the question:** name, sport, distance · ascent · date, and a tiny
         line or pin thumbnail; places show category and distance from you.
       - **Map-synced list:** scrolling or filtering highlights the matching lines/pins on the
@@ -107,9 +110,6 @@ What remains:
       PUT and DELETE `/course-service/course/{id}`, which answers 429 "not yet ready" for ~10 s
       after an edit); whether a watch drops or renames its copy on next sync is not. Check with
       the user's watch and state the answer in the delete confirmation.
-- [ ] **Import new activities without pressing a button.** Fetch the newest page on app start
-      (rate-limited, at most hourly) when Garmin is connected, filing by sport as the manual
-      import does; keep the manual "Import older" for history.
 - [ ] **Courses on the watch, not just in Connect.** Garmin exposes no per-device course list
       we have found; the live Epix bridge returns its device entry, but its device-message list
       currently has only software updates. Atlas now remembers successful sends and flags later

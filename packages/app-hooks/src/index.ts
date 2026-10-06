@@ -10,6 +10,7 @@ export {
   garminCourseSports,
   garminDeliveryLine,
   useGarmin,
+  type GarminAutoImport,
   type GarminCourse,
   type GarminDelivery,
   type GarminState,
@@ -17,10 +18,14 @@ export {
 export {
   activityDate,
   activityYear,
+  activityYearCounts,
   activityYears,
+  librarySportCounts,
   librarySports,
   libraryTrackKind,
+  libraryTrackLine,
   libraryTrackSport,
+  libraryTrackTags,
   libraryTracks,
   type LibraryView,
 } from './libraryViews.js';

@@ -4,10 +4,11 @@ import {
   collectionTagSuggestions,
   filterCollectionRecords,
   activityDate,
-  activityYears,
-  librarySports,
-  libraryTrackKind,
+  activityYearCounts,
+  librarySportCounts,
+  libraryTrackLine,
   libraryTrackSport,
+  libraryTrackTags,
   libraryTracks,
   type LibraryView,
   flattenCollectionTree,
@@ -24,10 +25,10 @@ import {
   type CollectionDropZone,
 } from '@atlas/app-hooks';
 import {
+  fmtShortDate,
   folderHasPinLabels,
+  garminSportIcon,
   tagHasPinLabels,
-  trackListLine,
-  userTags,
   type CollectionRevealTarget,
 } from '@atlas/core';
 import type {
@@ -54,11 +55,44 @@ import { flattenFolders } from './folders';
 import { confirmDelete, ItemEditor } from './ItemEditor';
 import { ReorderableList } from './ReorderableList';
 import { PinLabelIcon } from './icons';
+import { ActionMenu, FilterMenu } from './FilterMenu';
 import { GarminCourses } from './GarminCourses';
 import { theme } from './theme';
 
 /** Tracks a folder level draws before its "Show more" button. */
 const TRACK_PAGE = 30;
+/**
+ * Places a list draws before its "Show more" button. A camper-stop guide imported as one folder
+ * is 780 pins, and every row drawn up front made the Places tab take seconds to open.
+ */
+const PLACE_PAGE = 40;
+/** The folder a Garmin Explore waypoint export is filed into. */
+const GARMIN_LOCATIONS = 'Garmin locations';
+
+type CollectionsView = LibraryView | 'garmin';
+
+const VIEW_LABELS: Record<CollectionsView, string> = {
+  folders: 'Folders',
+  places: 'Places',
+  courses: 'Routes',
+  activities: 'Activities',
+  garmin: 'Garmin',
+};
+
+/** "14:05" today, otherwise "3 Oct". */
+function fmtCheckTime(at: number): string {
+  const date = new Date(at);
+  if (date.toDateString() === new Date().toDateString()) {
+    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+  }
+  return fmtShortDate(at);
+}
+
+/** "2026-05-01" → "1 May" (this year) or "1 May 2025". */
+function recordedLabel(date: string): string {
+  const [year, month, day] = date.split('-').map(Number) as [number, number, number];
+  return fmtShortDate(new Date(year, month - 1, day).getTime());
+}
 
 export type EditablePlacePatch = Pick<
   PlacePatch,
@@ -527,7 +561,7 @@ export function FavoritesSheet({
   // What the list is narrowed to. Session-only: a filter is a way of looking
   // at the list, not a property of it.
   const [filter, setFilter] = useState('');
-  const [view, setView] = useState<LibraryView | 'garmin'>('folders');
+  const [view, setView] = useState<CollectionsView>('folders');
   const [sport, setSport] = useState<string | null>(null);
   const [year, setYear] = useState<number | null>(null);
   // The folder being looked at; null is the top level. One level at a time:
@@ -540,6 +574,7 @@ export function FavoritesSheet({
   // How many tracks a level draws before "Show more": a folder of a few
   // hundred activities rendered every row up front.
   const [trackLimit, setTrackLimit] = useState(TRACK_PAGE);
+  const [placeLimit, setPlaceLimit] = useState(PLACE_PAGE);
   const [highlighted, setHighlighted] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   const revealRowRef = useRef<View>(null);
@@ -563,6 +598,9 @@ export function FavoritesSheet({
     };
   }, [highlighted]);
   const [newFolder, setNewFolder] = useState('');
+  // The new-folder field, folded behind a button: an always-open text box on
+  // every level was the first thing under the tabs, above the folders it adds to.
+  const [addingFolder, setAddingFolder] = useState(false);
   // The current folder's name is open for editing (its header's Rename).
   const [renaming, setRenaming] = useState(false);
 
@@ -572,6 +610,19 @@ export function FavoritesSheet({
     setEditingKey(null);
     setRenaming(false);
     setTrackLimit(TRACK_PAGE);
+    setPlaceLimit(PLACE_PAGE);
+    setAddingFolder(false);
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
+  };
+
+  /** Switch tabs, starting the new one unfiltered and from the top. */
+  const showView = (next: CollectionsView) => {
+    setView(next);
+    setSport(null);
+    setYear(null);
+    setTrackLimit(TRACK_PAGE);
+    setPlaceLimit(PLACE_PAGE);
+    setEditingKey(null);
     scrollRef.current?.scrollTo({ y: 0, animated: false });
   };
 
@@ -610,8 +661,19 @@ export function FavoritesSheet({
       libraryTracks(filtered.tracks, view === 'activities' ? 'activities' : 'courses', sport, year),
     [filtered.tracks, view, sport, year],
   );
-  const sports = useMemo(() => librarySports(viewSource), [viewSource]);
-  const years = useMemo(() => activityYears(viewSource), [viewSource]);
+  const sports = useMemo(() => librarySportCounts(viewSource), [viewSource]);
+  const years = useMemo(() => activityYearCounts(viewSource), [viewSource]);
+  // Tab counts are of everything saved, so a filter typed on one tab does not
+  // make another look empty.
+  const activities = useMemo(() => libraryTracks(tracks, 'activities', null, null), [tracks]);
+  const garminLocations = useMemo(
+    () => collections.find((item) => item.name === GARMIN_LOCATIONS && item.parentId === null),
+    [collections],
+  );
+  const folderNames = useMemo(
+    () => new Map(collections.map((item) => [item.id, item.name])),
+    [collections],
+  );
   // Folder tree — derived by the shared model, so web and Android agree on
   // nesting, ordering and what happens to a folder whose parent is missing.
   // Browsing walks the whole tree; a filter lists what the filtered one holds.
@@ -655,6 +717,9 @@ export function FavoritesSheet({
       const levelTracks = level === null ? allTree.tracks : allTree.byId.get(level)!.tracks;
       const index = tracksForList(levelTracks).findIndex((track) => track.id === revealItem.id);
       setTrackLimit(Math.max(TRACK_PAGE, index + 1));
+      const levelPlaces = level === null ? allTree.places : allTree.byId.get(level)!.places;
+      const placeIndex = levelPlaces.findIndex((place) => place.id === revealItem.id);
+      setPlaceLimit(Math.max(PLACE_PAGE, placeIndex + 1));
       setHighlighted(`${revealItem.kind}:${revealItem.id}`);
     }
     onRevealed?.();
@@ -686,6 +751,7 @@ export function FavoritesSheet({
     if (!name) return;
     onCreateFolder(name, folderId);
     setNewFolder('');
+    setAddingFolder(false);
   };
 
   const dropPlaceAtFolder = (place: PlaceRecord, pageY: number): boolean => {
@@ -724,7 +790,7 @@ export function FavoritesSheet({
 
   const toggleEditing = (key: string) => setEditingKey((cur) => (cur === key ? null : key));
 
-  const placeRow = (place: PlaceRecord, handle: ReactNode): ReactNode => {
+  const placeRow = (place: PlaceRecord, handle: ReactNode, folderName?: string): ReactNode => {
     const key = `place:${place.id}`;
     return (
       <View>
@@ -755,7 +821,8 @@ export function FavoritesSheet({
             <Text style={styles.rowText} numberOfLines={1}>
               {place.name}
             </Text>
-            <Text style={styles.muted}>
+            <Text style={styles.muted} numberOfLines={1}>
+              {folderName ? `${folderName} · ` : ''}
               {place.address || `${place.lat.toFixed(4)}, ${place.lng.toFixed(4)}`}
             </Text>
             {placeCommutes.has(place.id) ? (
@@ -832,7 +899,7 @@ export function FavoritesSheet({
           ]}
         >
           <View style={styles.trackIconBox}>
-            <Text style={styles.trackIcon}>〰</Text>
+            <Text style={styles.trackIcon}>{garminSportIcon(libraryTrackSport(track))}</Text>
           </View>
           <Pressable
             style={styles.rowMain}
@@ -845,17 +912,10 @@ export function FavoritesSheet({
             <Text style={styles.rowText} numberOfLines={1}>
               {track.name}
             </Text>
-            <Text style={styles.muted}>
-              {libraryTrackKind(track) === 'course'
-                ? 'Garmin + Atlas · '
-                : libraryTrackKind(track) === 'activity'
-                  ? 'Garmin recording · Atlas copy · '
-                  : 'Atlas · '}
-              {libraryTrackSport(track) ? `${libraryTrackSport(track)} · ` : ''}
-              {activityDate(track) ? `${activityDate(track)} · ` : ''}
-              {trackListLine(track.stats)}
+            <Text style={styles.muted} numberOfLines={1}>
+              {libraryTrackLine(track)}
             </Text>
-            <TagChips tags={userTags(track.tags)} onPick={setFilter} />
+            <TagChips tags={libraryTrackTags(track)} onPick={setFilter} />
           </Pressable>
           <Pressable
             style={styles.eyeButton}
@@ -944,19 +1004,51 @@ export function FavoritesSheet({
     );
   };
 
-  const renderPlaces = (level: PlaceRecord[]): ReactNode => {
+  /**
+   * Places, a page at a time. Inside a folder they can be dragged into order or
+   * onto a folder; a flat list across folders (the Places tab) has no order to
+   * arrange, so its rows name their folder instead of carrying a handle.
+   */
+  const renderPlaces = (level: PlaceRecord[], flat = false): ReactNode => {
     if (level.length === 0) return null;
+    const shown = level.slice(0, placeLimit);
+    const rest = level.length - shown.length;
     return (
-      <ReorderableList
-        items={level}
-        keyOf={(place) => place.id}
-        onMove={(place, target, zone) =>
-          onDrop({ kind: 'place', id: place.id }, { kind: 'place', id: target.id }, zone)
-        }
-        onDragActive={onDragActive}
-        onDropAt={dropPlaceAtFolder}
-        renderRow={placeRow}
-      />
+      <View>
+        {flat ? (
+          shown.map((place) => (
+            <View key={place.id}>
+              {placeRow(
+                place,
+                null,
+                place.collectionId ? folderNames.get(place.collectionId) : undefined,
+              )}
+            </View>
+          ))
+        ) : (
+          <ReorderableList
+            items={shown}
+            keyOf={(place) => place.id}
+            onMove={(place, target, zone) =>
+              onDrop({ kind: 'place', id: place.id }, { kind: 'place', id: target.id }, zone)
+            }
+            onDragActive={onDragActive}
+            onDropAt={dropPlaceAtFolder}
+            renderRow={(place, handle) => placeRow(place, handle)}
+          />
+        )}
+        {rest > 0 ? (
+          <Pressable
+            style={[styles.button, styles.buttonQuiet, styles.moreButton]}
+            onPress={() => setPlaceLimit((limit) => limit + PLACE_PAGE)}
+            testID="collections-more-places"
+          >
+            <Text style={styles.buttonQuietText}>
+              Show {Math.min(rest, PLACE_PAGE)} more of {rest}
+            </Text>
+          </Pressable>
+        ) : null}
+      </View>
     );
   };
 
@@ -1121,43 +1213,40 @@ export function FavoritesSheet({
         />
         <Text style={styles.chipButtonText}>Names</Text>
       </View>
-      <Pressable
-        style={styles.chipButton}
-        onPress={() => setRenaming(true)}
-        testID={`folder-name-${folder.id}`}
-      >
-        <Text style={styles.chipButtonText}>Rename</Text>
-      </Pressable>
-      {folder.parentId !== null ? (
-        <Pressable
-          style={styles.chipButton}
-          onPress={() => onMoveFolder(folder.id, promoteParentId(collections, folder))}
-          accessibilityLabel={`Move ${folder.name} up one level`}
-          testID={`folder-up-${folder.id}`}
-        >
-          <Text style={styles.chipButtonText}>↑ Move up</Text>
-        </Pressable>
-      ) : null}
-      <Pressable
-        style={styles.chipButton}
-        onPress={() =>
-          confirmDelete(
-            `Delete folder “${folder.name}”?`,
-            'Places, tracks and subfolders inside it move up one level.',
-            () => {
-              openFolder(
-                folder.parentId !== null && allTree.byId.has(folder.parentId)
-                  ? folder.parentId
-                  : null,
-              );
-              onDeleteFolder(folder.id);
-            },
-          )
-        }
-        testID={`folder-delete-${folder.id}`}
-      >
-        <Text style={[styles.chipButtonText, styles.dangerText]}>Delete</Text>
-      </Pressable>
+      <ActionMenu
+        title={folder.name}
+        testID={`folder-more-${folder.id}`}
+        actions={[
+          { label: 'Rename', onPress: () => setRenaming(true), testID: `folder-name-${folder.id}` },
+          ...(folder.parentId !== null
+            ? [
+                {
+                  label: 'Move up one level',
+                  onPress: () => onMoveFolder(folder.id, promoteParentId(collections, folder)),
+                  testID: `folder-up-${folder.id}`,
+                },
+              ]
+            : []),
+          {
+            label: 'Delete folder…',
+            danger: true,
+            onPress: () =>
+              confirmDelete(
+                `Delete folder “${folder.name}”?`,
+                'Places, tracks and subfolders inside it move up one level.',
+                () => {
+                  openFolder(
+                    folder.parentId !== null && allTree.byId.has(folder.parentId)
+                      ? folder.parentId
+                      : null,
+                  );
+                  onDeleteFolder(folder.id);
+                },
+              ),
+            testID: `folder-delete-${folder.id}`,
+          },
+        ]}
+      />
     </View>
   );
 
@@ -1171,25 +1260,37 @@ export function FavoritesSheet({
       <>
         {current ? folderActions(current.folder) : null}
         {renderFolders(subfolders)}
-        <View style={styles.row}>
-          <TextInput
-            style={[styles.folderName, styles.newFolderInput]}
-            value={newFolder}
-            onChangeText={setNewFolder}
-            placeholder={current ? `New folder in ${current.folder.name}…` : 'New folder…'}
-            returnKeyType="done"
-            onSubmitEditing={addFolder}
-            testID="folder-new-name"
-          />
+        {addingFolder ? (
+          <View style={styles.row}>
+            <TextInput
+              style={[styles.folderName, styles.newFolderInput]}
+              value={newFolder}
+              onChangeText={setNewFolder}
+              placeholder={current ? `New folder in ${current.folder.name}` : 'New folder name'}
+              autoFocus
+              returnKeyType="done"
+              onSubmitEditing={addFolder}
+              testID="folder-new-name"
+            />
+            <Pressable
+              style={[styles.button, newFolder.trim() ? null : styles.buttonDisabled]}
+              disabled={!newFolder.trim()}
+              onPress={addFolder}
+              testID="folder-add"
+            >
+              <Text style={styles.buttonText}>Add</Text>
+            </Pressable>
+          </View>
+        ) : (
           <Pressable
-            style={[styles.button, newFolder.trim() ? null : styles.buttonDisabled]}
-            disabled={!newFolder.trim()}
-            onPress={addFolder}
-            testID="folder-add"
+            style={styles.newFolderButton}
+            onPress={() => setAddingFolder(true)}
+            accessibilityLabel={current ? `New folder in ${current.folder.name}` : 'New folder'}
+            testID="folder-new"
           >
-            <Text style={styles.buttonText}>Add</Text>
+            <Text style={styles.link}>＋ New folder</Text>
           </Pressable>
-        </View>
+        )}
         {nothingSaved ? (
           <Text style={styles.muted}>
             Nothing saved yet. Long-press the map to save a pin, import a GPX/KML/KMZ file — or sign
@@ -1249,6 +1350,229 @@ export function FavoritesSheet({
     );
   };
 
+  /** Sport and year filters, then what they leave and a way to put just that on the map. */
+  const libraryFilters = (): ReactNode => {
+    const noun = view === 'activities' ? 'activities' : 'routes';
+    if (viewSource.length === 0) return null;
+    return (
+      <View style={styles.libraryFilters}>
+        <View style={styles.filterPills}>
+          {sports.length > 1 ? (
+            <FilterMenu
+              label="Sport"
+              allLabel="All sports"
+              value={sport}
+              options={sports.map((item) => ({
+                key: item.sport,
+                label: item.sport,
+                count: item.count,
+              }))}
+              onChange={(next) => {
+                setSport(next);
+                setTrackLimit(TRACK_PAGE);
+              }}
+              testID="library-sport"
+            />
+          ) : null}
+          {view === 'activities' && years.length > 1 ? (
+            <FilterMenu
+              label="Year"
+              allLabel="All years"
+              value={year}
+              options={years.map((item) => ({
+                key: item.year,
+                label: String(item.year),
+                count: item.count,
+              }))}
+              onChange={(next) => {
+                setYear(next);
+                setTrackLimit(TRACK_PAGE);
+              }}
+              testID="library-year"
+            />
+          ) : null}
+        </View>
+        <View style={styles.summaryRow}>
+          <Text style={styles.summaryText} numberOfLines={1}>
+            {viewTracks.length}{' '}
+            {viewTracks.length !== 1 ? noun : view === 'activities' ? 'activity' : 'route'}
+            {view === 'activities' ? ', newest first' : ''}
+          </Text>
+          <Pressable
+            style={viewTracks.length === 0 && styles.buttonDisabled}
+            disabled={viewTracks.length === 0}
+            onPress={() => onShowOnlyTracks(viewTracks.map((track) => track.id))}
+            hitSlop={10}
+            accessibilityLabel={`Show only these ${noun} on the map`}
+            testID="library-show-only-matches"
+          >
+            <Text style={styles.link}>Show only these on map</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  };
+
+  /** What a library tab says when it has nothing to list, and where to get some. */
+  const libraryEmpty = (): ReactNode => {
+    if (view === 'places') {
+      return filtered.active ? (
+        <Text style={styles.muted}>No saved places match “{filter.trim()}”.</Text>
+      ) : (
+        <Text style={styles.muted}>
+          No saved places yet. Long-press the map to save one, or import a GPX/KML file.
+        </Text>
+      );
+    }
+    if (viewSource.length > 0) {
+      return <Text style={styles.muted}>Nothing matches these filters.</Text>;
+    }
+    const garminHint = garmin.connected
+      ? 'Import them from your Garmin account on the Garmin tab.'
+      : 'Connect Garmin in Settings → Garmin to bring them in, or import GPX files.';
+    return (
+      <View style={styles.emptyBlock}>
+        <Text style={styles.muted}>
+          {view === 'activities'
+            ? `No activities yet. ${garminHint}`
+            : 'No routes yet. Save one from the route planner, import a GPX file, or save a Garmin course.'}
+        </Text>
+        {garmin.connected ? (
+          <Pressable
+            style={[styles.button, styles.buttonQuiet, styles.emptyButton]}
+            onPress={() => showView('garmin')}
+          >
+            <Text style={styles.buttonQuietText}>Open Garmin</Text>
+          </Pressable>
+        ) : null}
+      </View>
+    );
+  };
+
+  /**
+   * Garmin Connect as one place: what has come in (activities, watch locations)
+   * and the course library that lives on Garmin's side. The imported tracks
+   * themselves are browsed on the Activities and Routes tabs, which have the
+   * sport and year filters — this tab used to list all of them a second time,
+   * unfiltered, above the locations nobody then scrolled down to.
+   */
+  const renderGarmin = (): ReactNode => {
+    const newest = activities[0] ? activityDate(activities[0]) : null;
+    const locationPlaces = garminLocations
+      ? places.filter((place) => place.collectionId === garminLocations.id)
+      : [];
+    const last = garmin.lastImport;
+    return (
+      <View testID="garmin-library">
+        {garmin.error ? <Text style={styles.error}>{garmin.error}</Text> : null}
+        <View style={styles.card}>
+          <View style={styles.cardHead}>
+            <Text style={styles.cardTitle}>Activities</Text>
+            <View style={styles.cardActions}>
+              {/* Checking is what the schedule does by itself; by hand it is a
+                  small refresh, not the screen's main button. */}
+              <Pressable
+                style={[styles.iconButton, garmin.busy && styles.buttonDisabled]}
+                disabled={garmin.busy}
+                onPress={() => void garmin.checkNewActivities()}
+                hitSlop={8}
+                accessibilityLabel="Check Garmin for new activities"
+                testID="garmin-check-newest"
+              >
+                {garmin.busy ? (
+                  <ActivityIndicator size="small" color={theme.accent} />
+                ) : (
+                  <Text style={styles.iconButtonText}>↻</Text>
+                )}
+              </Pressable>
+              {activities.length > 0 ? (
+                <Pressable
+                  onPress={() => showView('activities')}
+                  hitSlop={10}
+                  testID="garmin-browse-activities"
+                >
+                  <Text style={styles.link}>Browse ›</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          </View>
+          <Text style={styles.muted}>
+            {activities.length > 0
+              ? `${activities.length} in Atlas${newest ? ` · newest ${recordedLabel(newest)}` : ''}`
+              : 'None yet. Tap ↻ to import; GPS activities are filed by sport.'}
+            {garmin.lastActivityCheck ? ` · checked ${fmtCheckTime(garmin.lastActivityCheck)}` : ''}
+          </Text>
+          {last ? (
+            <Text style={styles.muted} testID="garmin-import-result">
+              {last.imported > 0
+                ? `Added ${last.imported} ${last.imported === 1 ? 'activity' : 'activities'}`
+                : 'Nothing new'}
+              {last.errors > 0 ? ` · ${last.errors} failed` : ''}
+              {last.sorted > 0 ? ` · filed ${last.sorted} into sport folders` : ''}
+            </Text>
+          ) : null}
+          {/* Each check also reaches further back until the whole history is in. */}
+          {activities.length > 0 ? (
+            <Text style={styles.muted} testID="garmin-history-status">
+              {garmin.historyComplete
+                ? 'Whole Garmin history imported.'
+                : garmin.nextActivityOffset > 0
+                  ? `Older history: ${garmin.nextActivityOffset} checked so far, more with each check.`
+                  : 'Older history is filled in with each check.'}
+            </Text>
+          ) : null}
+          <Text style={styles.muted} testID="garmin-auto-status">
+            {garmin.autoImport === 'off'
+              ? 'Automatic import is off (Settings → Garmin).'
+              : `Checks by itself ${garmin.autoImport === 'daily' ? 'daily' : 'every 6 hours'}.`}
+          </Text>
+        </View>
+        <View style={styles.card}>
+          <View style={styles.cardHead}>
+            <Text style={styles.cardTitle}>Saved locations</Text>
+            {garminLocations ? (
+              <Pressable
+                onPress={() => {
+                  showView('folders');
+                  openFolder(garminLocations.id);
+                }}
+                hitSlop={10}
+                testID="garmin-locations-open"
+              >
+                <Text style={styles.link}>Open folder ›</Text>
+              </Pressable>
+            ) : null}
+          </View>
+          <Text style={styles.muted}>
+            {locationPlaces.length > 0 ? `${locationPlaces.length} in ${GARMIN_LOCATIONS}. ` : ''}
+            Atlas can’t read watch locations from Garmin yet. Export them as GPX from Garmin Explore
+            and import the file here.
+          </Text>
+          <View style={styles.buttonRow}>
+            <Pressable
+              style={[styles.button, styles.buttonQuiet]}
+              onPress={() =>
+                void onImport(
+                  garminLocations
+                    ? { collectionId: garminLocations.id }
+                    : { newCollection: { name: GARMIN_LOCATIONS } },
+                )
+              }
+              testID="garmin-locations-import"
+            >
+              <Text style={styles.buttonQuietText}>Import GPX</Text>
+            </Pressable>
+          </View>
+        </View>
+        <GarminCourses
+          garmin={garmin}
+          onReveal={onRevealGarminItem}
+          onShowTrack={onShowGarminTrack}
+        />
+      </View>
+    );
+  };
+
   return (
     <BottomSheet
       visible={visible}
@@ -1261,73 +1585,58 @@ export function FavoritesSheet({
         <Text style={styles.heading}>Collections</Text>
         <View style={styles.headerActions}>
           <Pressable
-            style={[styles.button, styles.buttonQuiet, importOpen ? styles.buttonOn : null]}
+            style={[styles.headerButton, importOpen ? styles.buttonOn : null]}
             onPress={() => setImportOpen((open) => !open)}
-            accessibilityLabel="Import files, backups and permits"
+            accessibilityLabel="Import and export"
+            accessibilityState={{ expanded: importOpen }}
             testID="favorites-import"
           >
-            <Text style={styles.buttonQuietText}>Import</Text>
+            <Text style={styles.buttonQuietText}>Import · Export</Text>
           </Pressable>
+          {places.length > 0 || tracks.length > 0 || collections.length > 0 ? (
+            <Pressable
+              style={styles.headerIcon}
+              onPress={() => onSetAllVisible(!allShown)}
+              accessibilityLabel={
+                allShown ? 'Hide everything on the map' : 'Show everything on the map'
+              }
+              testID="toggle-all-visible"
+            >
+              <EyeIcon off={!allShown} />
+            </Pressable>
+          ) : null}
+          <Pressable
+            style={styles.headerIcon}
+            onPress={onClose}
+            hitSlop={8}
+            accessibilityLabel="Close Collections"
+            testID="favorites-close"
+          >
+            <Text style={styles.close}>✕</Text>
+          </Pressable>
+        </View>
+      </View>
+      {importOpen ? (
+        <View>
+          <ImportControls
+            folders={flatFolders}
+            onImport={onImport}
+            onImportInatur={onImportInatur}
+          />
           {/* Also in Settings → Account & data. Two homes on purpose: web puts
               it on this header, and a user who learned it there should find it
               here (rule 5 is about the data, not about one route to it). */}
           <Pressable
-            style={[styles.button, styles.buttonQuiet]}
+            style={[styles.button, styles.buttonQuiet, styles.exportButton]}
             onPress={onExportAll}
             testID="favorites-export-all"
           >
-            <Text style={styles.buttonQuietText}>Export all</Text>
+            <Text style={styles.buttonQuietText}>Export everything (backup file)</Text>
           </Pressable>
-          {places.length > 0 || tracks.length > 0 || collections.length > 0 ? (
-            <Pressable
-              style={[styles.button, styles.buttonQuiet]}
-              onPress={() => onSetAllVisible(!allShown)}
-              testID="toggle-all-visible"
-            >
-              <Text style={styles.buttonQuietText}>{allShown ? 'Hide all' : 'Show all'}</Text>
-            </Pressable>
-          ) : null}
         </View>
-      </View>
-      {importOpen ? (
-        <ImportControls folders={flatFolders} onImport={onImport} onImportInatur={onImportInatur} />
       ) : null}
 
-      <View style={styles.filterRow}>
-        <TextInput
-          style={[styles.textField, styles.filterInput]}
-          value={filter}
-          onChangeText={(text) => {
-            setFilter(text);
-            setTrackLimit(TRACK_PAGE);
-          }}
-          placeholder="Filter by name, #tag or notes"
-          autoCapitalize="none"
-          autoCorrect={false}
-          returnKeyType="search"
-          accessibilityLabel="Filter collections"
-          testID="collections-filter"
-        />
-        {filterTag !== null ? (
-          <PinLabelToggle
-            on={tagHasPinLabels(pinLabels.prefs, filterTag)}
-            what={`#${filterTag}`}
-            onToggle={() => void pinLabels.toggleTag(filterTag)}
-            testID="collections-filter-labels"
-          />
-        ) : null}
-        {filtered.active ? (
-          <Pressable
-            style={[styles.button, styles.buttonQuiet]}
-            onPress={() => setFilter('')}
-            accessibilityLabel="Clear filter"
-            testID="collections-filter-clear"
-          >
-            <Text style={styles.buttonQuietText}>✕</Text>
-          </Pressable>
-        ) : null}
-      </View>
-      <View style={styles.choiceRow} accessibilityRole="tablist">
+      <View style={styles.tabBar} accessibilityRole="tablist">
         {(
           [
             'folders',
@@ -1339,95 +1648,71 @@ export function FavoritesSheet({
         ).map((item) => (
           <Pressable
             key={item}
-            style={[styles.folderChip, view === item && styles.folderChipSelected]}
-            onPress={() => {
-              setView(item);
-              setSport(null);
-              setYear(null);
-              setTrackLimit(TRACK_PAGE);
-            }}
+            style={[styles.tab, view === item && styles.tabOn]}
+            onPress={() => showView(item)}
             accessibilityRole="tab"
             accessibilityState={{ selected: view === item }}
             testID={`collections-view-${item}`}
           >
-            <Text style={styles.folderChipText}>
-              {
-                {
-                  folders: 'Folders',
-                  places: 'Places',
-                  courses: 'Routes & courses',
-                  activities: 'Activities',
-                  garmin: 'Garmin',
-                }[item]
-              }
+            <Text
+              style={[styles.tabText, view === item && styles.tabTextOn]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+            >
+              {VIEW_LABELS[item]}
             </Text>
           </Pressable>
         ))}
       </View>
-      {view === 'courses' || view === 'activities' ? (
-        <>
-          <View style={styles.choiceRow}>
-            <Pressable
-              style={[styles.folderChip, !sport && styles.folderChipSelected]}
-              onPress={() => setSport(null)}
-              testID="library-sport-all"
-            >
-              <Text style={styles.folderChipText}>All sports</Text>
-            </Pressable>
-            {sports.map((item) => (
-              <Pressable
-                key={item}
-                style={[styles.folderChip, sport === item && styles.folderChipSelected]}
-                onPress={() => {
-                  setSport(item);
-                  setTrackLimit(TRACK_PAGE);
-                }}
-                testID={`library-sport-${item}`}
-              >
-                <Text style={styles.folderChipText}>{item}</Text>
-              </Pressable>
-            ))}
-          </View>
-          {view === 'activities' ? (
-            <View style={styles.choiceRow}>
-              <Pressable
-                style={[styles.folderChip, !year && styles.folderChipSelected]}
-                onPress={() => setYear(null)}
-                testID="library-year-all"
-              >
-                <Text style={styles.folderChipText}>All years</Text>
-              </Pressable>
-              {years.map((item) => (
-                <Pressable
-                  key={item}
-                  style={[styles.folderChip, year === item && styles.folderChipSelected]}
-                  onPress={() => {
-                    setYear(item);
-                    setTrackLimit(TRACK_PAGE);
-                  }}
-                  testID={`library-year-${item}`}
-                >
-                  <Text style={styles.folderChipText}>{item}</Text>
-                </Pressable>
-              ))}
-            </View>
+      {view !== 'garmin' ? (
+        <View style={styles.filterRow}>
+          <TextInput
+            style={[styles.textField, styles.filterInput]}
+            value={filter}
+            onChangeText={(text) => {
+              setFilter(text);
+              setTrackLimit(TRACK_PAGE);
+              setPlaceLimit(PLACE_PAGE);
+            }}
+            placeholder={
+              view === 'folders'
+                ? 'Filter by name, #tag or notes'
+                : `Filter ${VIEW_LABELS[view].toLocaleLowerCase()}`
+            }
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="search"
+            accessibilityLabel="Filter collections"
+            testID="collections-filter"
+          />
+          {filterTag !== null ? (
+            <PinLabelToggle
+              on={tagHasPinLabels(pinLabels.prefs, filterTag)}
+              what={`#${filterTag}`}
+              onToggle={() => void pinLabels.toggleTag(filterTag)}
+              testID="collections-filter-labels"
+            />
           ) : null}
-          <Pressable
-            style={[styles.chipButton, viewTracks.length === 0 && styles.buttonDisabled]}
-            disabled={viewTracks.length === 0}
-            onPress={() => onShowOnlyTracks(viewTracks.map((track) => track.id))}
-            testID="library-show-only-matches"
-          >
-            <Text style={styles.chipButtonText}>Show matching tracks only on map</Text>
-          </Pressable>
-        </>
+          {filtered.active ? (
+            <Pressable
+              style={[styles.button, styles.buttonQuiet]}
+              onPress={() => setFilter('')}
+              accessibilityLabel="Clear filter"
+              testID="collections-filter-clear"
+            >
+              <Text style={styles.buttonQuietText}>✕</Text>
+            </Pressable>
+          ) : null}
+        </View>
       ) : null}
+      {view === 'courses' || view === 'activities' ? libraryFilters() : null}
       {view === 'folders' && !filtered.active && current ? folderHeader(current.folder) : null}
 
       <ScrollView
         ref={scrollRef}
         style={styles.scroll}
         scrollEnabled={!dragActive}
+        keyboardShouldPersistTaps="handled"
         onScroll={(event) => {
           scrollY.current = event.nativeEvent.contentOffset.y;
         }}
@@ -1439,117 +1724,21 @@ export function FavoritesSheet({
         {view === 'folders' && filtered.active && filtered.empty ? (
           <Text style={styles.muted}>Nothing here matches “{filter.trim()}”.</Text>
         ) : null}
-        {view === 'folders' ? (
-          filtered.active ? (
-            renderResults()
-          ) : (
-            renderLevel()
-          )
-        ) : view === 'garmin' ? (
-          <View>
-            <GarminCourses
-              garmin={garmin}
-              onReveal={onRevealGarminItem}
-              onShowTrack={onShowGarminTrack}
-            />
-            <Text style={styles.subheading}>Imported activities</Text>
-            <View style={styles.buttonRow}>
-              <Pressable
-                style={styles.button}
-                disabled={garmin.busy}
-                onPress={() => void garmin.importActivities()}
-                testID="garmin-import"
-              >
-                <Text style={styles.buttonText}>
-                  {garmin.busy
-                    ? 'Working…'
-                    : garmin.nextActivityOffset > 0
-                      ? 'Import older'
-                      : 'Import recent'}
-                </Text>
-              </Pressable>
-              {garmin.nextActivityOffset > 0 ? (
-                <Pressable
-                  style={styles.button}
-                  disabled={garmin.busy}
-                  onPress={() => void garmin.restartActivityImport()}
-                  testID="garmin-check-newest"
-                >
-                  <Text style={styles.buttonText}>Check newest</Text>
-                </Pressable>
-              ) : null}
-            </View>
-            {renderTracks(libraryTracks(filtered.tracks, 'activities', null, null), true)}
-            <Text style={styles.subheading}>Saved locations</Text>
-            <Text style={styles.muted}>
-              Export waypoints as GPX from Garmin Explore, then import the file here. Garmin Connect
-              does not provide watch locations through this connection.
-            </Text>
-            <Pressable
-              style={styles.button}
-              onPress={() => {
-                const folder = collections.find(
-                  (item) => item.name === 'Garmin locations' && item.parentId === null,
-                );
-                void onImport(
-                  folder
-                    ? { collectionId: folder.id }
-                    : { newCollection: { name: 'Garmin locations' } },
-                );
-              }}
-              testID="garmin-locations-import"
-            >
-              <Text style={styles.buttonText}>Import saved locations</Text>
-            </Pressable>
-            {renderPlaces(
-              filtered.places.filter((place) =>
-                collections.some(
-                  (item) => item.id === place.collectionId && item.name === 'Garmin locations',
-                ),
-              ),
-            )}
-            {garmin.error ? <Text style={styles.muted}>{garmin.error}</Text> : null}
-          </View>
-        ) : (
-          <>
-            {view === 'places' ? (
-              <>
-                <Text style={styles.muted}>
-                  Atlas saved places. Garmin saved locations are not imported.
-                </Text>
-                {renderPlaces(filtered.places)}
-              </>
-            ) : (
-              <>
-                {view === 'courses' ? (
-                  <Text style={styles.muted}>
-                    Atlas routes and saved Garmin course copies. Garmin-only courses are in Garmin.
-                  </Text>
-                ) : null}
-                {renderTracks(viewTracks, true)}
-              </>
-            )}
-            {(view === 'places' ? filtered.places.length === 0 : viewTracks.length === 0) ? (
-              <Text style={styles.muted}>
-                No{' '}
-                {view === 'places'
-                  ? 'saved places'
-                  : view === 'courses'
-                    ? 'routes or courses'
-                    : 'activities'}{' '}
-                match these filters.
-              </Text>
-            ) : null}
-          </>
-        )}
+        {view === 'folders'
+          ? filtered.active
+            ? renderResults()
+            : renderLevel()
+          : view === 'garmin'
+            ? renderGarmin()
+            : view === 'places'
+              ? filtered.places.length > 0
+                ? renderPlaces(filtered.places, true)
+                : libraryEmpty()
+              : viewTracks.length > 0
+                ? renderTracks(viewTracks, true)
+                : libraryEmpty()}
+        <View style={styles.listFoot} />
       </ScrollView>
-      <Pressable
-        style={[styles.button, styles.closeButton]}
-        onPress={onClose}
-        testID="favorites-close"
-      >
-        <Text style={styles.buttonText}>Close</Text>
-      </Pressable>
     </BottomSheet>
   );
 }
@@ -1564,7 +1753,7 @@ const styles = StyleSheet.create({
     gap: 6,
     marginBottom: 6,
   },
-  heading: { fontSize: 15, fontWeight: '700', color: theme.text },
+  heading: { fontSize: 17, fontWeight: '700', color: theme.text },
   headerActions: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
   importBlock: {
     borderWidth: 1,
@@ -1584,7 +1773,75 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
   },
   folderChipSelected: { borderColor: theme.accent, backgroundColor: theme.surfaceMuted },
-  folderChipText: { fontSize: 12, color: theme.text },
+  folderChipText: { fontSize: 13, color: theme.text },
+  folderChipTextOn: { fontWeight: '700' },
+  // Top-level views as a tab bar: equal widths, all five always on screen
+  // (a scrolling pill row hid the last one, Garmin, past the edge).
+  tabBar: {
+    flexDirection: 'row',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: theme.border,
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  tab: {
+    flex: 1,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+    paddingHorizontal: 2,
+  },
+  tabOn: { borderBottomColor: theme.accent },
+  tabText: { fontSize: 14, color: theme.textMuted, fontWeight: '600' },
+  tabTextOn: { color: theme.accent },
+  libraryFilters: { marginTop: 8, marginBottom: 2 },
+  filterPills: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  summaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginTop: 8,
+  },
+  summaryText: { flexShrink: 1, fontSize: 13, color: theme.textMuted, fontWeight: '600' },
+  link: { color: theme.accent, fontWeight: '600', fontSize: 14 },
+  error: { fontSize: 13, color: theme.danger, marginTop: 6 },
+  emptyBlock: { marginTop: 8, gap: 8, alignItems: 'flex-start' },
+  emptyButton: { marginTop: 4 },
+  card: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.border,
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 10,
+    gap: 4,
+  },
+  cardHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  cardTitle: { fontSize: 15, fontWeight: '700', color: theme.text },
+  cardActions: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  cardLink: { alignSelf: 'flex-start', paddingVertical: 6 },
+  iconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: theme.surfaceMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconButtonText: { fontSize: 20, lineHeight: 22, color: theme.accent, fontWeight: '700' },
+  headerButton: {
+    backgroundColor: theme.surfaceMuted,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    minHeight: 36,
+    justifyContent: 'center',
+  },
+  headerIcon: { minWidth: 36, minHeight: 36, alignItems: 'center', justifyContent: 'center' },
+  exportButton: { marginTop: 8, alignItems: 'center' },
+  newFolderButton: { paddingVertical: 12 },
+  listFoot: { height: 24 },
   textField: {
     borderWidth: 1,
     borderColor: theme.border,
@@ -1684,14 +1941,7 @@ const styles = StyleSheet.create({
   trackIcon: { fontSize: 18, color: theme.textMuted },
   rowMain: { flexShrink: 1, flexGrow: 1 },
   rowText: { fontSize: 16, color: theme.text },
-  subheading: {
-    fontSize: 16,
-    color: theme.text,
-    fontWeight: '700',
-    marginTop: 18,
-    marginBottom: 7,
-  },
-  buttonRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
+  buttonRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6 },
   button: {
     backgroundColor: theme.accent,
     borderRadius: 8,
@@ -1704,5 +1954,4 @@ const styles = StyleSheet.create({
   buttonQuietText: { color: theme.text, fontWeight: '600' },
   // A quiet button that is currently *doing* something — the open disclosure.
   buttonOn: { borderWidth: 1, borderColor: theme.accent },
-  closeButton: { marginTop: 14, alignSelf: 'stretch', alignItems: 'center' },
 });

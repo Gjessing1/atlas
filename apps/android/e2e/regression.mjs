@@ -602,6 +602,8 @@ function dynamicId(xml, pattern, label) {
 
 async function createFolderAndReadPlace() {
   await openCollectionsAtRoot();
+  // The name field is folded behind "＋ New folder" and takes focus as it opens.
+  await tap('folder-new');
   await replaceText('folder-new-name', 'regression folder');
   // Submit from the field itself. On Android a tap immediately after `input
   // text` can be consumed by the IME dismissal even though the button's

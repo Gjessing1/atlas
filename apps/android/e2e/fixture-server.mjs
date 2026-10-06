@@ -14,6 +14,7 @@ import {
   lastWidgetBoard,
   widgetFixtureResponse,
 } from './transit-fixture.mjs';
+import { garminFixtureEnabled, handleGarminFixture } from './garmin-fixture.mjs';
 
 const host = process.env.ATLAS_E2E_HOST ?? '0.0.0.0';
 const port = Number(process.env.ATLAS_E2E_PORT ?? 3199);
@@ -300,10 +301,11 @@ const server = createServer(async (request, response) => {
         status: 'ok',
         app: 'Atlas E2E',
         gitSha: 'android-regression-fixture',
-        sync: false,
-        registration: 'closed',
+        sync: garminFixtureEnabled,
+        registration: garminFixtureEnabled ? 'open' : 'closed',
       });
     }
+    if (await handleGarminFixture(url, request, response, { json, readJson })) return;
     if (url.pathname === '/api/layers') return json(response, { layers: [] });
     if (url.pathname === '/api/regions') return json(response, { regions: [] });
     if (url.pathname === '/api/app/version') return json(response, null, 404);

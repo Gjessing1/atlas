@@ -1433,15 +1433,44 @@ function GarminSection({ garmin }: { garmin: GarminState }) {
     <View>
       <Text style={styles.heading}>Garmin Connect</Text>
       <Text style={styles.muted}>
-        Connect your Garmin account here. Browse courses, import activities and view saved copies in
-        Collections → Garmin.
-      </Text>
-      <Text style={styles.muted}>
-        Watch saved locations can be imported from a Garmin Explore GPX file in Collections →
-        Garmin.
+        Your courses, imported activities and watch locations are in Collections → Garmin.
       </Text>
       {garmin.connected ? (
         <View>
+          <Text style={styles.subheading}>Import new activities</Text>
+          <View style={styles.themeRow} accessibilityRole="radiogroup">
+            {(
+              [
+                ['off', 'Off'],
+                ['sixHours', 'Every 6 h'],
+                ['daily', 'Daily'],
+              ] as const
+            ).map(([mode, label]) => (
+              <Pressable
+                key={mode}
+                style={[styles.themeOption, garmin.autoImport === mode && styles.themeOptionOn]}
+                onPress={() => void garmin.setAutoImport(mode)}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: garmin.autoImport === mode }}
+                testID={`garmin-auto-${mode}`}
+              >
+                <Text
+                  style={[
+                    styles.themeOptionText,
+                    garmin.autoImport === mode && styles.themeOptionTextOn,
+                  ]}
+                >
+                  {label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={styles.muted}>
+            On this device, while Atlas is open or the next time it opens. New GPS activities are
+            filed into Garmin activities by sport, and each check also fills in older history until
+            all of it is imported. Turn this on for one device only, so two don’t import the same
+            activity at once.
+          </Text>
           <Pressable
             style={[styles.button, styles.buttonQuiet]}
             disabled={garmin.busy}
@@ -1512,18 +1541,6 @@ function GarminSection({ garmin }: { garmin: GarminState }) {
         </View>
       )}
       {garmin.error ? <Text style={styles.error}>{garmin.error}</Text> : null}
-      {garmin.lastImport ? (
-        <Text style={styles.muted}>
-          Imported {garmin.lastImport.imported}; skipped {garmin.lastImport.skipped};{' '}
-          {garmin.lastImport.errors} failed.
-          {garmin.lastImport.sorted > 0
-            ? ` Filed ${garmin.lastImport.sorted} earlier ${garmin.lastImport.sorted === 1 ? 'import' : 'imports'} into sport folders.`
-            : ''}
-          {garmin.nextActivityOffset > 0
-            ? ` Next batch starts at activity ${garmin.nextActivityOffset + 1}.`
-            : ' All available activity pages checked.'}
-        </Text>
-      ) : null}
     </View>
   );
 }

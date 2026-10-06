@@ -11,7 +11,7 @@ import {
 import { buildGpx, computeTrackStats, parseGpx } from '@atlas/gpx';
 import { routePathToTrackData, type RoutePath, type RoutingProfile } from '@atlas/routing';
 import type { AtlasStorage, CollectionRecord, TrackRecord } from '@atlas/storage';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SyncState } from './useSync.js';
 import type { UserData } from './useUserData.js';
 
@@ -149,8 +149,16 @@ export interface GarminState {
     deviceId?: string,
   ) => Promise<void>;
   clearCourseResult: () => void;
+  /** Imports the next 30 activities further back in history. */
   importActivities: () => Promise<void>;
   restartActivityImport: () => Promise<void>;
+  /** Imports everything recorded since the newest activity already in Atlas. */
+  checkNewActivities: () => Promise<void>;
+  /** This device's schedule for `checkNewActivities`. */
+  autoImport: GarminAutoImport;
+  setAutoImport: (value: GarminAutoImport) => Promise<void>;
+  /** When this device last checked for new activities (epoch ms); null if never. */
+  lastActivityCheck: number | null;
   /** The Garmin Connect course library; null until first loaded. */
   courses: GarminCourse[] | null;
   /** Course id → id of the Atlas track saved from it, when there is one. */
@@ -175,6 +183,24 @@ export interface GarminState {
 }
 
 const activityOffsetKey = (email: string) => `local.garmin.activityOffset.${email}`;
+/** Set once importing walked back to the oldest activity Garmin has. */
+const historyCompleteKey = (email: string) => `local.garmin.historyComplete.${email}`;
+/** How far back into older history one check reaches: 150 activities, paced like a person. */
+const BACKFILL_PAGES = 5;
+
+/**
+ * How often new activities are fetched by themselves. Per device (`local.`): two devices on a
+ * schedule would race to import the same recording before either had synced it.
+ */
+export type GarminAutoImport = 'off' | 'sixHours' | 'daily';
+const AUTO_IMPORT_KEY = 'local.garmin.autoImport';
+const LAST_CHECK_KEY = 'local.garmin.lastActivityCheck';
+const AUTO_IMPORT_INTERVAL_MS: Record<Exclude<GarminAutoImport, 'off'>, number> = {
+  sixHours: 6 * 3_600_000,
+  daily: 24 * 3_600_000,
+};
+const isAutoImport = (value: unknown): value is GarminAutoImport =>
+  value === 'off' || value === 'sixHours' || value === 'daily';
 
 /** Garmin account operations shared by web and Android. Atlas keeps imported tracks locally. */
 export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): GarminState {
@@ -189,11 +215,17 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
   const [nextActivityOffset, setNextActivityOffset] = useState(0);
   const [historyComplete, setHistoryComplete] = useState(false);
   const [courses, setCourses] = useState<GarminCourse[] | null>(null);
+  const [autoImport, setAutoImportState] = useState<GarminAutoImport>('off');
+  // undefined until read from settings, null when no check has run on this device.
+  const [lastActivityCheck, setLastActivityCheck] = useState<number | null | undefined>(undefined);
   const [deliveries, setDeliveries] = useState<ReadonlyMap<string, GarminDelivery>>(new Map());
   const [pendingCourseId, setPendingCourseId] = useState<string | null>(null);
   const [courseNotice, setCourseNotice] = useState<string | null>(null);
   const [courseError, setCourseError] = useState<string | null>(null);
   const request = sync.accountRequest;
+  // Settings are read once local storage is open: before that `getSetting` answers null, and
+  // a schedule read then would look switched off for the whole session.
+  const storageReady = data.storage !== null && data.storage !== undefined;
 
   const run = useCallback(async (work: () => Promise<void>) => {
     setBusy(true);
@@ -237,21 +269,45 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
   }, [sync.email, refresh]);
 
   useEffect(() => {
-    if (!sync.email) return;
+    if (!sync.email || !storageReady) return;
     let active = true;
-    void data.getSetting(activityOffsetKey(sync.email)).then((value) => {
+    void Promise.all([
+      data.getSetting(activityOffsetKey(sync.email)),
+      data.getSetting(historyCompleteKey(sync.email)),
+    ]).then(([value, complete]) => {
+      if (!active) return;
       const parsed = Number(value);
-      if (active && Number.isInteger(parsed) && parsed >= 0 && parsed <= 100_000) {
+      if (Number.isInteger(parsed) && parsed >= 0 && parsed <= 100_000) {
         setNextActivityOffset(parsed);
       }
+      setHistoryComplete(complete === '1');
     });
     return () => {
       active = false;
     };
-  }, [sync.email, data.getSetting]);
+  }, [sync.email, data.getSetting, storageReady]);
+
+  useEffect(() => {
+    if (!storageReady) return;
+    let active = true;
+    void Promise.all([data.getSetting(AUTO_IMPORT_KEY), data.getSetting(LAST_CHECK_KEY)]).then(
+      ([mode, checked]) => {
+        if (!active) return;
+        if (isAutoImport(mode)) setAutoImportState(mode);
+        const at = Number(checked);
+        setLastActivityCheck(checked && Number.isFinite(at) && at > 0 ? at : null);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [data.getSetting, storageReady]);
 
   const resetActivityOffset = useCallback(async () => {
-    if (sync.email) await data.setSetting(activityOffsetKey(sync.email), '0');
+    if (sync.email) {
+      await data.setSetting(activityOffsetKey(sync.email), '0');
+      await data.setSetting(historyCompleteKey(sync.email), '0');
+    }
     setNextActivityOffset(0);
     setHistoryComplete(false);
   }, [sync.email, data.setSetting]);
@@ -346,6 +402,78 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
     setCourseError(null);
   }, []);
 
+  /**
+   * Imports one page of 30 activities from `start` (0 = newest). Activities already in Atlas
+   * (by Garmin id) and indoor ones without a GPS route are skipped; `known` counts the former,
+   * which is what tells a check for new activities that it has caught up.
+   */
+  const importPage = useCallback(
+    async (storage: AtlasStorage, start: number) => {
+      const response = await request<{ activities: GarminActivity[] }>(
+        `/api/garmin/activities?start=${start}`,
+      );
+      const existing = await storage.listTracks();
+      const tags = new Set(existing.flatMap((track) => track.tags));
+      const folders = sportFolders(storage, ACTIVITIES_FOLDER);
+      // Activities imported before sport folders existed sit in the top folder; file them now.
+      // Only those still directly in it move — a track the user filed elsewhere stays put.
+      let sorted = 0;
+      const root = await folders.root(false);
+      for (const track of existing) {
+        if (!root || track.collectionId !== root.id) continue;
+        if (!track.tags.some((tag) => tag.startsWith(GARMIN_ACTIVITY_TAG))) continue;
+        const folder = await folders.forType(typeTag(track.tags));
+        await storage.updateTrack(track.id, { collectionId: folder.id });
+        sorted++;
+      }
+      let imported = 0;
+      let skipped = 0;
+      let known = 0;
+      let errors = 0;
+      for (const activity of response.activities) {
+        const tag = `${GARMIN_ACTIVITY_TAG}${activity.id}`;
+        if (tags.has(tag)) {
+          skipped++;
+          known++;
+          continue;
+        }
+        if (activity.hasRoute === false) {
+          skipped++;
+          continue;
+        }
+        try {
+          const { gpx } = await request<{ gpx: string }>(
+            `/api/garmin/activities/${activity.id}/gpx`,
+          );
+          const track = parseGpx(gpx);
+          if (track.segments.every((segment) => segment.length < 2)) {
+            skipped++;
+            continue;
+          }
+          const folder = await folders.forType(activity.type);
+          const name = activity.name.trim() || track.name || 'Garmin activity';
+          await storage.createTrack({
+            name,
+            gpx,
+            stats: computeTrackStats(track) as unknown as Record<string, number>,
+            collectionId: folder.id,
+            notes: activity.date
+              ? `Recorded ${activity.date} in Garmin Connect`
+              : 'Garmin Connect activity',
+            tags: [tag, ...(activity.type ? [activity.type] : [])],
+          });
+          tags.add(tag);
+          imported++;
+        } catch {
+          errors++;
+        }
+      }
+      return { count: response.activities.length, imported, skipped, known, errors, sorted };
+    },
+    [request],
+  );
+
+  /** Imports the next page of history, walking back from the newest 30 at a time. */
   const importActivities = useCallback(
     () =>
       run(async () => {
@@ -358,72 +486,110 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
           Number.isInteger(savedOffset) && savedOffset >= 0 && savedOffset <= 100_000
             ? savedOffset
             : 0;
-        const response = await request<{ activities: GarminActivity[] }>(
-          `/api/garmin/activities?start=${start}`,
-        );
-        const existing = await storage.listTracks();
-        const tags = new Set(existing.flatMap((track) => track.tags));
-        const folders = sportFolders(storage, ACTIVITIES_FOLDER);
-        // Activities imported before sport folders existed sit in the top folder; file them now.
-        // Only those still directly in it move — a track the user filed elsewhere stays put.
-        let sorted = 0;
-        const root = await folders.root(false);
-        for (const track of existing) {
-          if (!root || track.collectionId !== root.id) continue;
-          if (!track.tags.some((tag) => tag.startsWith(GARMIN_ACTIVITY_TAG))) continue;
-          const folder = await folders.forType(typeTag(track.tags));
-          await storage.updateTrack(track.id, { collectionId: folder.id });
-          sorted++;
-        }
-        let imported = 0;
-        let skipped = 0;
-        let errors = 0;
-        for (const activity of response.activities) {
-          const tag = `${GARMIN_ACTIVITY_TAG}${activity.id}`;
-          if (tags.has(tag)) {
-            skipped++;
-            continue;
-          }
-          if (activity.hasRoute === false) {
-            skipped++;
-            continue;
-          }
-          try {
-            const { gpx } = await request<{ gpx: string }>(
-              `/api/garmin/activities/${activity.id}/gpx`,
-            );
-            const track = parseGpx(gpx);
-            if (track.segments.every((segment) => segment.length < 2)) {
-              skipped++;
-              continue;
-            }
-            const folder = await folders.forType(activity.type);
-            const name = activity.name.trim() || track.name || 'Garmin activity';
-            await storage.createTrack({
-              name,
-              gpx,
-              stats: computeTrackStats(track) as unknown as Record<string, number>,
-              collectionId: folder.id,
-              notes: activity.date
-                ? `Recorded ${activity.date} in Garmin Connect`
-                : 'Garmin Connect activity',
-              tags: [tag, ...(activity.type ? [activity.type] : [])],
-            });
-            tags.add(tag);
-            imported++;
-          } catch {
-            errors++;
-          }
-        }
+        const page = await importPage(storage, start);
         await data.refreshAll();
-        const next = response.activities.length === 30 ? start + 30 : 0;
+        const next = page.count === 30 ? start + 30 : 0;
         await data.setSetting(key, String(next));
+        if (next === 0) await data.setSetting(historyCompleteKey(sync.email), '1');
         setNextActivityOffset(next);
         setHistoryComplete(next === 0);
-        setLastImport({ imported, skipped, errors, sorted });
+        setLastImport({
+          imported: page.imported,
+          skipped: page.skipped,
+          errors: page.errors,
+          sorted: page.sorted,
+        });
       }),
-    [data, request, run, sync.email],
+    [data, importPage, run, sync.email],
   );
+
+  /**
+   * One check, by hand (↻) or on the schedule. First what was recorded since the last import:
+   * pages from the newest until one holds an activity Atlas already has (or Garmin runs out),
+   * at most ten pages. Then, until the whole history is in, up to five more pages further back
+   * from where the last check stopped — so an account connected with years of recordings
+   * fills in over a few checks without anyone pressing "Import older" thirty times.
+   */
+  const checkNewActivities = useCallback(
+    () =>
+      run(async () => {
+        const storage = data.storage;
+        if (!storage) throw new Error('Local storage is unavailable.');
+        const email = sync.email;
+        if (!email) throw new Error('Sign in to your Atlas account first.');
+        const checkedAt = Date.now();
+        // Stamped before the work, so a failing check waits for its next turn instead of
+        // retrying on every render.
+        await data.setSetting(LAST_CHECK_KEY, String(checkedAt));
+        setLastActivityCheck(checkedAt);
+        const total = { imported: 0, skipped: 0, errors: 0, sorted: 0 };
+        const add = (page: Awaited<ReturnType<typeof importPage>>) => {
+          total.imported += page.imported;
+          total.skipped += page.skipped;
+          total.errors += page.errors;
+          total.sorted += page.sorted;
+        };
+        let start = 0;
+        let reachedEnd = false;
+        for (let pages = 0; pages < 10; pages++) {
+          const page = await importPage(storage, start);
+          add(page);
+          start += 30;
+          reachedEnd = page.count < 30;
+          if (reachedEnd || page.known > 0) break;
+        }
+        const offsetKey = activityOffsetKey(email);
+        const saved = Number((await data.getSetting(offsetKey)) ?? 0);
+        // Every page this pass listed was imported whole, so history resumes after them.
+        let offset = Math.max(
+          start,
+          Number.isInteger(saved) && saved >= 0 && saved <= 100_000 ? saved : 0,
+        );
+        let complete = reachedEnd || (await data.getSetting(historyCompleteKey(email))) === '1';
+        for (let pages = 0; !complete && pages < BACKFILL_PAGES; pages++) {
+          const page = await importPage(storage, offset);
+          add(page);
+          if (page.count < 30) {
+            offset = 0;
+            complete = true;
+          } else offset += 30;
+        }
+        await data.refreshAll();
+        if (complete) offset = 0;
+        await data.setSetting(offsetKey, String(offset));
+        if (complete) await data.setSetting(historyCompleteKey(email), '1');
+        setNextActivityOffset(offset);
+        setHistoryComplete(complete);
+        setLastImport(total);
+      }),
+    [data, importPage, run, sync.email],
+  );
+
+  const setAutoImport = useCallback(
+    async (value: GarminAutoImport) => {
+      await data.setSetting(AUTO_IMPORT_KEY, value);
+      setAutoImportState(value);
+    },
+    [data.setSetting],
+  );
+
+  // The schedule: check when a check falls due while Atlas is open, and on the next open after
+  // one fell due while it was closed (JS timers do not run in the background). It waits for
+  // this session's first sync so activities another device already imported are known, rather
+  // than imported again under new ids.
+  const checkRef = useRef(checkNewActivities);
+  checkRef.current = checkNewActivities;
+  useEffect(() => {
+    if (connected !== true || autoImport === 'off' || !data.storage || sync.lastSyncAt === null)
+      return;
+    if (lastActivityCheck === undefined) return;
+    const due = (lastActivityCheck ?? 0) + AUTO_IMPORT_INTERVAL_MS[autoImport];
+    const timer = setTimeout(
+      () => void checkRef.current(),
+      Math.min(Math.max(0, due - Date.now()), 2 ** 31 - 1),
+    );
+    return () => clearTimeout(timer);
+  }, [connected, autoImport, lastActivityCheck, data.storage, sync.lastSyncAt]);
 
   const restartActivityImport = useCallback(async () => {
     await resetActivityOffset();
@@ -653,6 +819,10 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
     clearCourseResult,
     importActivities,
     restartActivityImport,
+    checkNewActivities,
+    autoImport,
+    setAutoImport,
+    lastActivityCheck: lastActivityCheck ?? null,
     courses,
     savedCourses,
     coursesOnMap,

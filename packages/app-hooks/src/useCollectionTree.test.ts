@@ -161,6 +161,21 @@ describe('folder browsing helpers', () => {
     ]);
   });
 
+  it('dates a Garmin import whose GPX has no times by the day Garmin recorded it', () => {
+    const tracks = [
+      { name: 'untimed', stats: {}, notes: '' },
+      { name: 'May run', stats: {}, notes: 'Recorded 2026-05-01 in Garmin Connect' },
+      { name: 'timed', stats: { startTime: new Date(2026, 2, 1).getTime() }, notes: '' },
+      { name: 'June run', stats: {}, notes: 'Recorded 2026-06-01 in Garmin Connect' },
+    ];
+    expect(tracksForList(tracks).map((track) => track.name)).toEqual([
+      'June run',
+      'May run',
+      'timed',
+      'untimed',
+    ]);
+  });
+
   it('says what a folder holds, singular and plural', () => {
     expect(folderContentsLine({ children: [1, 2], places: [1], tracks: [] })).toBe(
       '2 folders · 1 place',

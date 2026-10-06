@@ -1,4 +1,4 @@
-import type { GarminState } from '@atlas/app-hooks';
+import type { GarminAutoImport, GarminState } from '@atlas/app-hooks';
 import { useState } from 'react';
 
 export function GarminPanel({ garmin }: { garmin: GarminState }) {
@@ -20,6 +20,26 @@ export function GarminPanel({ garmin }: { garmin: GarminState }) {
       {garmin.connected ? (
         <>
           <p>Connected to Garmin Connect.</p>
+          <h4>Import new activities</h4>
+          <label>
+            Check Garmin for new activities
+            <select
+              value={garmin.autoImport}
+              onChange={(event) =>
+                void garmin.setAutoImport(event.currentTarget.value as GarminAutoImport)
+              }
+              data-testid="garmin-auto-import"
+            >
+              <option value="off">Off</option>
+              <option value="sixHours">Every 6 hours</option>
+              <option value="daily">Daily</option>
+            </select>
+          </label>
+          <p className="settings-note">
+            In this browser, while Atlas is open or the next time it opens. Each check also fills in
+            older history until all of it is imported. Turn this on for one device only, so two
+            don’t import the same activity at once.
+          </p>
           <h4>Connection</h4>
           <button type="button" disabled={garmin.busy} onClick={() => void garmin.disconnect()}>
             Disconnect Garmin

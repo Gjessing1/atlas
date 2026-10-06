@@ -230,16 +230,24 @@ export function ancestorFolderIds<C extends TreeFolder, P extends TreeItem, T ex
 /**
  * A folder's tracks in list order: recorded ones newest first — an activity
  * folder is browsed by when, and imported runs share names — then the rest in
- * the order they came (by name, from storage).
+ * the order they came (by name, from storage). "Recorded" is the GPX's own
+ * start time, or for a Garmin import whose file carries no times, the day
+ * Garmin says it was recorded (its notes): without that fallback such runs
+ * sank to the bottom of their sport folder in import order.
  */
-export function tracksForList<T extends { stats: Record<string, number> }>(
+export function tracksForList<T extends { stats: Record<string, number>; notes?: string }>(
   tracks: readonly T[],
 ): T[] {
-  const start = (track: T) => track.stats['startTime'];
+  const start = (track: T): number | undefined => {
+    const time = track.stats['startTime'];
+    if (typeof time === 'number') return time;
+    const day = track.notes ? /^Recorded (\d{4})-(\d{2})-(\d{2})/.exec(track.notes) : null;
+    return day ? new Date(Number(day[1]), Number(day[2]) - 1, Number(day[3])).getTime() : undefined;
+  };
   const recorded = tracks
-    .filter((track) => typeof start(track) === 'number')
+    .filter((track) => start(track) !== undefined)
     .sort((a, b) => start(b)! - start(a)!);
-  return [...recorded, ...tracks.filter((track) => typeof start(track) !== 'number')];
+  return [...recorded, ...tracks.filter((track) => start(track) === undefined)];
 }
 
 /** What a folder row says it holds: "2 folders · 45 tracks · 1 place", or "Empty". */

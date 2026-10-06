@@ -241,6 +241,16 @@ before that destination. Also:
 - **Pointing the app at a local backend:** Settings → Server → `http://10.0.2.2:<port>` (the host
   from inside the emulator). Plain HTTP is allowed (`usesCleartextTraffic`).
 
+## Looking at the Garmin screens without a Garmin account
+
+`ATLAS_E2E_GARMIN=1 node apps/android/e2e/fixture-server.mjs` adds a signed-in account to the
+fixture: any email and password signs in, sync accepts pushes and returns nothing, and
+`/api/garmin/*` serves 12 courses, two watches and 205 GPS activities in the sport and year mix of
+a real account (mostly running, a tail of ten other sports, 2022–2026). Point the app at it
+(Settings → System → `http://10.0.2.2:3199`), sign in under Account & data, and Collections gains
+its Garmin tab; the ↻ on its Activities card imports everything. The release regression does
+not set the variable — it runs signed out, and the health check reports sync as unavailable.
+
 ## Artifacts
 
 A failed run writes `apps/android/e2e/artifacts/`: `failure.png`, `failure.txt` (the error and the

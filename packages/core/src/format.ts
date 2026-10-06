@@ -227,6 +227,23 @@ export function garminSportFolder(typeKey: string | null | undefined): string {
   return garminTypeLabel(typeKey);
 }
 
+const SPORT_ICONS: Record<string, string> = {
+  Running: '🏃',
+  Cycling: '🚴',
+  Skiing: '⛷️',
+  Skating: '⛸️',
+  Hiking: '🥾',
+  Walking: '🚶',
+  Swimming: '🏊',
+  Paddling: '🛶',
+  Hunting: '🦌',
+};
+
+/** The icon a list row shows for a sport folder (`garminSportFolder`); a plain line otherwise. */
+export function garminSportIcon(sport: string | null | undefined): string {
+  return (sport && SPORT_ICONS[sport]) || '〰';
+}
+
 /**
  * The sports a Garmin course can be set to from Atlas. The bridge holds the matching Garmin
  * type ids (verified against Garmin's activity-type table 2026-10-04) and refuses any other key.

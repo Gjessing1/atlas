@@ -476,7 +476,10 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     surface: 'collections',
     capability: 'Show or hide everything at once',
     web: { file: 'apps/web/src/Sidebar.tsx', contains: 'Hide all' },
-    android: { file: 'apps/android/src/ui/FavoritesSheet.tsx', contains: 'Hide all' },
+    android: {
+      file: 'apps/android/src/ui/FavoritesSheet.tsx',
+      contains: 'Hide everything on the map',
+    },
   },
   {
     id: 'collections-import-tracks',
@@ -498,7 +501,7 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     surface: 'collections',
     capability: 'Export everything as one backup file',
     web: { file: 'apps/web/src/Sidebar.tsx', contains: 'Export all' },
-    android: { file: 'apps/android/src/ui/FavoritesSheet.tsx', contains: 'Export all' },
+    android: { file: 'apps/android/src/ui/FavoritesSheet.tsx', contains: 'Export everything' },
   },
   {
     id: 'collections-restore-backup',

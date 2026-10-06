@@ -270,3 +270,170 @@ it('manages Garmin courses and saves a copy into the course sport folder', async
   expect(result.current.pendingCourseId).toBeNull();
   await storage.close();
 });
+
+it('checks for new activities from the newest until it reaches known ones, on a schedule', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    const storage = new AtlasStorage(createNodeSqlDriver());
+    await storage.init();
+    // Garmin's newest-first list: 31 new runs, then one Atlas already has, then older history.
+    // The page holding the known one is still imported whole (30 + 29), and the same check
+    // goes on back into the history no import has reached yet (the last 10).
+    const all = Array.from({ length: 70 }, (_, index) => ({
+      id: String(1000 - index),
+      name: `Run ${index}`,
+      date: '2026-10-01',
+      type: 'running',
+    }));
+    await storage.createTrack({
+      name: 'Known',
+      gpx: GPX,
+      stats: {},
+      collectionId: null,
+      notes: '',
+      tags: [`garmin:${all[31]!.id}`],
+    });
+    const pages: number[] = [];
+    const accountRequest = vi.fn(async (path: string) => {
+      if (path.endsWith('/status')) return { connected: true };
+      const start = /start=(\d+)/.exec(path);
+      if (start) {
+        pages.push(Number(start[1]));
+        return { activities: all.slice(Number(start[1]), Number(start[1]) + 30) };
+      }
+      if (path.endsWith('/gpx')) return { gpx: GPX };
+      throw new Error(`Unexpected ${path}`);
+    });
+    const settings = new Map<string, string>([['local.garmin.autoImport', 'daily']]);
+    const sync = {
+      email: 'atlas@example.com',
+      accountRequest,
+      lastSyncAt: Date.now(),
+    } as unknown as SyncState;
+    const data = {
+      storage,
+      refreshAll: vi.fn(async () => {}),
+      getSetting: vi.fn(async (key: string) => settings.get(key)),
+      setSetting: vi.fn(async (key: string, value: string) => {
+        settings.set(key, value);
+      }),
+    } as unknown as UserData<unknown>;
+    const { result } = renderHook(() => useGarmin(sync, data));
+    // Never checked on this device, so the schedule is already due.
+    await waitFor(() => expect(result.current.lastImport).not.toBeNull());
+    expect(pages).toEqual([0, 30, 60]);
+    expect(result.current.lastImport).toMatchObject({ imported: 69, skipped: 1 });
+    expect(result.current.autoImport).toBe('daily');
+    expect(result.current.historyComplete).toBe(true);
+    expect(settings.get('local.garmin.historyComplete.atlas@example.com')).toBe('1');
+    const checked = result.current.lastActivityCheck!;
+    expect(checked).toBeGreaterThan(0);
+    // Nothing more until a day has passed.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(23 * 3_600_000);
+    });
+    expect(pages).toEqual([0, 30, 60]);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2 * 3_600_000);
+    });
+    // The next day: the newest page holds known activities and history is complete — one call.
+    await waitFor(() => expect(pages).toEqual([0, 30, 60, 0]));
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('fills in older history a few pages per check until it reaches the oldest', async () => {
+  const storage = new AtlasStorage(createNodeSqlDriver());
+  await storage.init();
+  const all = Array.from({ length: 400 }, (_, index) => ({
+    id: String(5000 - index),
+    name: `Run ${index}`,
+    date: '2026-10-01',
+    type: 'running',
+    hasRoute: false,
+  }));
+  // The newest 30 are already in Atlas (one known is enough to stop the new-activity pass).
+  await storage.createTrack({
+    name: 'Known',
+    gpx: GPX,
+    stats: {},
+    collectionId: null,
+    notes: '',
+    tags: [`garmin:${all[0]!.id}`],
+  });
+  const pages: number[] = [];
+  const accountRequest = vi.fn(async (path: string) => {
+    if (path.endsWith('/status')) return { connected: true };
+    const start = /start=(\d+)/.exec(path);
+    if (start) {
+      pages.push(Number(start[1]));
+      return { activities: all.slice(Number(start[1]), Number(start[1]) + 30) };
+    }
+    throw new Error(`Unexpected ${path}`);
+  });
+  const settings = new Map<string, string>();
+  const sync = {
+    email: 'atlas@example.com',
+    accountRequest,
+    lastSyncAt: null,
+  } as unknown as SyncState;
+  const data = {
+    storage,
+    refreshAll: vi.fn(async () => {}),
+    getSetting: vi.fn(async (key: string) => settings.get(key)),
+    setSetting: vi.fn(async (key: string, value: string) => {
+      settings.set(key, value);
+    }),
+  } as unknown as UserData<unknown>;
+  const { result } = renderHook(() => useGarmin(sync, data));
+  await waitFor(() => expect(result.current.connected).toBe(true));
+  await act(async () => {
+    await result.current.checkNewActivities();
+  });
+  expect(pages).toEqual([0, 30, 60, 90, 120, 150]);
+  expect(result.current.historyComplete).toBe(false);
+  expect(result.current.nextActivityOffset).toBe(180);
+  pages.length = 0;
+  await act(async () => {
+    await result.current.checkNewActivities();
+  });
+  // 400 activities: the last page (390) is short, so history is complete.
+  expect(pages).toEqual([0, 180, 210, 240, 270, 300]);
+  await act(async () => {
+    await result.current.checkNewActivities();
+  });
+  expect(pages.slice(6)).toEqual([0, 330, 360, 390]);
+  expect(result.current.historyComplete).toBe(true);
+  expect(result.current.nextActivityOffset).toBe(0);
+});
+
+it('reads its schedule once local storage has opened, not before', async () => {
+  const storage = new AtlasStorage(createNodeSqlDriver());
+  await storage.init();
+  await storage.setSetting('local.garmin.autoImport', 'sixHours');
+  const accountRequest = vi.fn(async () => ({ connected: true }));
+  const sync = {
+    email: 'atlas@example.com',
+    accountRequest,
+    lastSyncAt: null,
+  } as unknown as SyncState;
+  // useUserData's getSetting keeps one identity and answers null until storage has opened.
+  let open = false;
+  const getSetting = async (key: string) => (open ? storage.getSetting(key) : null);
+  const data = (ready: boolean) =>
+    ({
+      storage: ready ? storage : null,
+      refreshAll: vi.fn(async () => {}),
+      getSetting,
+      setSetting: vi.fn(async () => true),
+    }) as unknown as UserData<unknown>;
+  const { result, rerender } = renderHook(({ ready }) => useGarmin(sync, data(ready)), {
+    initialProps: { ready: false },
+  });
+  await waitFor(() => expect(result.current.connected).toBe(true));
+  expect(result.current.autoImport).toBe('off');
+  open = true;
+  rerender({ ready: true });
+  await waitFor(() => expect(result.current.autoImport).toBe('sixHours'));
+});
