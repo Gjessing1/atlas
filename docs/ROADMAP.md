@@ -430,17 +430,6 @@ preserved is in ARCHITECTURE.md → *What stays as it is*.
       the release on the deployed origin. Keep route dependencies in the parity checklist so a
       renamed or deleted backend capability fails before deployment too.
 
-- [ ] **Make the device regression's window reads fast.** A full run is ~15 min even on the
-      Ally-X worker (877 s on 2026-10-06, vs ~19 min on SOYO). The time goes into
-      `uiautomator dump`, at ~2.8 s per read on the worker against ~0.1 s for an adb round trip:
-      each dump starts a fresh `app_process` JVM and waits for an idle UI, which a live map
-      rarely gives. Every `waitFor` polls one. Moving the driver to the worker would save only
-      the round trips (~5 %). Keep one UiAutomator session warm on the device instead (a small
-      instrumentation server reached through `adb forward`, or the uiautomator2 server), and
-      have `readWindow()` fetch the hierarchy from it. Measure the per-read cost and the full run
-      on both backends before and after. Keep `uiautomator dump` as the fallback for failure
-      artifacts.
-
 - [ ] **Run the real Postgres sync store in CI.** The normal quality gate skips all seven
       `backend/src/pg.test.ts` cases, so production SQL, advisory locking, sequence cursors and
       transaction semantics are not exercised by the memory-store suite. Add a disposable

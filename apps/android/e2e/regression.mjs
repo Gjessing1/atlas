@@ -53,7 +53,98 @@ async function waitFor(label, read, accept, timeoutMs = 45_000) {
   throw new Error(`Timed out waiting for ${label}; last value was ${lastValue}`);
 }
 
+/**
+ * The warm UiAutomator server, when the session started one (the Ally-X worker's
+ * `--uiautomator2`): it holds one UiAutomation connection for the whole run, so a read costs
+ * ~0.3 s. `uiautomator dump` starts a fresh app_process JVM per read (~2.8 s), and every wait
+ * polls a read, so this sets the pace of the whole run.
+ */
+const uiautomator2 = { url: process.env.UIAUTOMATOR2_URL || null, session: null };
+/** Per reader, how many window reads the run made and their total time — printed at the end. */
+const windowReads = new Map();
+
+function uiautomator2Request(method, path, body) {
+  const args = ['--silent', '--show-error', '--fail', '--max-time', '30', '-X', method];
+  if (body) args.push('-H', 'content-type: application/json', '--data', JSON.stringify(body));
+  const result = spawnSync('curl', [...args, `${uiautomator2.url}${path}`], {
+    encoding: 'utf8',
+    maxBuffer: 32 * 1024 * 1024,
+  });
+  if (result.error || result.status !== 0) {
+    throw new Error(
+      `uiautomator2 ${method} ${path}: ${result.error?.message ?? result.stderr.trim()}`,
+    );
+  }
+  return JSON.parse(result.stdout);
+}
+
+// The attributes `uiautomator dump` writes. Everything below parses that shape with regexes,
+// so the server's extras (`text-entry-key`, `window-id`, …) are dropped rather than risk a
+// pattern matching inside one.
+const DUMP_ATTRIBUTES = new Set(
+  'index text resource-id class package content-desc checkable checked clickable enabled focusable focused scrollable long-clickable password selected bounds drawing-order hint'.split(
+    ' ',
+  ),
+);
+
+/** The server's page source in `uiautomator dump`'s shape: `<node>` tags, its attributes. */
+function dumpShaped(source) {
+  return source
+    .replace(/<hierarchy\b[^>]*?\brotation="(\d+)"[^>]*>/, '<hierarchy rotation="$1">')
+    .replace(/<\/(?!hierarchy>)[\w.$-]+>/g, '</node>')
+    .replace(
+      /<(?![?/]|hierarchy\b)[\w.$-]+((?:\s+[\w-]+="[^"]*")*)\s*(\/?)>/g,
+      (_, attributes, close) => {
+        const kept = [...attributes.matchAll(/([\w-]+)="[^"]*"/g)]
+          .filter((match) => DUMP_ATTRIBUTES.has(match[1]))
+          .map((match) => ` ${match[0]}`)
+          .join('');
+        return `<node${kept}${close}>`;
+      },
+    );
+}
+
+function readWindowFromServer() {
+  if (!uiautomator2.session) {
+    uiautomator2.session = uiautomator2Request('POST', '/wd/hub/session', {
+      capabilities: { alwaysMatch: { platformName: 'Android' } },
+    }).sessionId;
+    // Wait for a quiet UI before each read, as `uiautomator dump` does (it waits for 1 s of
+    // quiet, capped at 10 s). The scenarios rely on that: many read once right after a tap and
+    // expect the result already rendered. With no idle wait, the first worker run failed on a
+    // POI pill read 0 ms after its tap, though the failure artifact showed it selected.
+    uiautomator2Request('POST', `/wd/hub/session/${uiautomator2.session}/appium/settings`, {
+      settings: { waitForIdleTimeout: 10_000 },
+    });
+  }
+  return dumpShaped(
+    uiautomator2Request('GET', `/wd/hub/session/${uiautomator2.session}/source`).value,
+  );
+}
+
 function readWindow() {
+  const started = Date.now();
+  const reader = uiautomator2.url ? 'uiautomator2 server' : 'uiautomator dump';
+  try {
+    return readWindowOnce();
+  } finally {
+    const reads = windowReads.get(reader) ?? { count: 0, ms: 0 };
+    windowReads.set(reader, { count: reads.count + 1, ms: reads.ms + Date.now() - started });
+  }
+}
+
+function readWindowOnce() {
+  if (uiautomator2.url) {
+    try {
+      return readWindowFromServer();
+    } catch (error) {
+      // A dead server has released UiAutomation, so dump works again from here on.
+      console.log(
+        `Android regression: ${error.message}; reading windows with uiautomator dump from now on`,
+      );
+      uiautomator2.url = null;
+    }
+  }
   shell('uiautomator', 'dump', '/sdcard/atlas-regression-window.xml');
   return command(['exec-out', 'cat', '/sdcard/atlas-regression-window.xml']);
 }
@@ -754,12 +845,11 @@ async function planRoadRoute(folderId, placeId) {
 async function planTransitJourney(placeId) {
   await openRouteFromSavedPlace(placeId);
   await tap('route-profile-transit');
-  await waitFor(
-    'transit journey result',
-    hierarchy,
-    (xml) => Boolean(nodeForId(xml, 'transit-trip-0')),
-    30_000,
-  );
+  // The journeys list below the stops and the time controls, under the half sheet's
+  // edge. `uiautomator dump` still listed the first row there (clipped to inverted bounds),
+  // and this step once passed on that alone; the warm UiAutomator server drops nodes clipped
+  // away entirely, so prove the result by scrolling to it.
+  await waitForIdAfterScroll('transit-trip-0', 'route-scroll', 'up', 30_000);
   // `useTransitPlan` opens the best journey by default; scroll to its action.
   // Tapping the already-selected summary would collapse it.
   await tapAfterScroll('transit-start-0', 'route-scroll');
@@ -1553,6 +1643,11 @@ try {
   console.error(error.stack ?? error);
   process.exitCode = 1;
 } finally {
+  for (const [reader, { count, ms }] of windowReads) {
+    console.log(
+      `Android regression: ${count} window reads by ${reader}, ${(ms / 1000).toFixed(0)} s in all (${(ms / count / 1000).toFixed(2)} s each)`,
+    );
+  }
   try {
     shell('settings', 'put', 'system', 'user_rotation', '0');
   } catch {

@@ -15,10 +15,10 @@ ATLAS_ANDROID_REGRESSION_APK=$PWD/apps/android/android/app/build/outputs/apk/rel
   infrastructure/packs/publish-update.sh
 ```
 
-Budget ~20 min for a regression, plus ~10 min when it has to build the APK itself. The native
-script requires a clean committed worktree and the same commit deployed at `/api/health`; it
-checks the APK's package and version before starting the device. **When a run
-fails and you change only `regression.mjs` (or the fixture server), reuse the APK**: the app has
+Budget ~7 min for a regression on the Ally-X worker (~20 min on this host's AVD), plus ~10 min
+when it has to build the APK itself. The native script requires a clean committed worktree and
+the same commit deployed at `/api/health`; it checks the APK's package and version before
+starting the device. **When a run fails and you change only `regression.mjs` (or the fixture server), reuse the APK**: the app has
 not changed, so rebuilding it buys nothing. On 2026-09-17 three retries that each fixed only the
 script rebuilt an identical APK, 10 min apiece.
 
@@ -44,14 +44,32 @@ as with a local AVD, so the scenario code does not know which backend it got.
   run is a red run. Every run ends with `Android regression backend: <ally-x|local> — passed/failed after N s`.
 - **On the worker this host's state doesn't matter.** CI, swap and load checks guard the
   _local_ AVD only, so a regression can run on the worker while CI builds here.
-- **The local AVD waits for a quiet host.** Before a local run, the script refuses if Forgejo
-  CI is running. It waits up to 10 min (`ATLAS_ANDROID_LOAD_WAIT_SECONDS`) for the 1-minute load
-  to fall to 3 or below (`ATLAS_ANDROID_MAX_LOCAL_LOAD`), printing the busiest processes, e.g. a
-  video encode or the candidate's own Gradle build. Then the swap check below runs.
+- **The local AVD needs a quiet host, and the script never waits for one.** Before a local
+  run, it refuses at once if Forgejo CI is running or the 1-minute load is above 3
+  (`ATLAS_ANDROID_MAX_LOCAL_LOAD`), naming the busiest processes, e.g. a video encode or the
+  candidate's own Gradle build. Then the swap check below runs. The worker either takes the
+  run or it doesn't. A busy fallback is a refusal, not a 10-minute wait (removed 2026-10-06), so
+  a `local` run straight after the APK build usually refuses. Rerun it with
+  `ATLAS_ANDROID_REGRESSION_APK` once `uptime` has fallen.
 - **Results:** a worker run also writes `artifacts/ally-x/`: `logcat.txt` for the whole session,
   `emulator.log`, and `session.txt` with boot, install, command and total seconds. These are
   written on success too. The usual failure artifacts (`failure.png`, `window.xml`, …) are
   written by `regression.mjs` as before.
+- **On the worker, window reads go through a warm UiAutomator server.** `run-regression.sh`
+  asks for `--uiautomator2`, and `readWindow()` then fetches the hierarchy from it over HTTP
+  instead of running `uiautomator dump` (worker README: "Warm UiAutomator server"). The run
+  ends by printing `N window reads by <reader>, … s each`, so compare that line across runs.
+  `dumpShaped()` rewrites the server's XML into dump's `<node>` shape with dump's attributes, so
+  every regex in the scenarios works unchanged. Each read still waits for a quiet UI first, as
+  dump does, because the scenarios read once right after a tap and expect the result already
+  rendered. The first worker run had no idle wait (`waitForIdleTimeout` 0) and failed on a
+  correct app. If the server fails to start or dies, the run logs it and continues with
+  `uiautomator dump`. The local AVD always uses dump.
+- **The server leaves out nodes clipped entirely below a scroll edge, and dump does not.** Dump
+  lists them with inverted bounds (`[54,1595][666,1537]`), which is why `visibleNode()` exists.
+  `planTransitJourney` used to wait for `transit-trip-0` under the half sheet's edge without
+  scrolling, and passed only on that quirk. A step that proves something below the fold must
+  scroll to it (`waitForIdAfterScroll`). Never use a bare `waitForId`/`nodeForId` there.
 - **The worker's AVD renders with the Radeon iGPU**, not SwiftShader. A symbol-layer screenshot
   from it can therefore differ from one taken here; see the next sections for this host's AVD.
 

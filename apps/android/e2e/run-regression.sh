@@ -54,28 +54,19 @@ fi
 # This host's AVD loses focus and key events when CI is building on the same four cores,
 # or when anything else keeps them busy (a video encode), even when the app is correct.
 # Only the local emulator cares: on the worker, this host just runs the light driver.
-# Prints the reason and succeeds when the host is too busy; waits out a passing load spike
-# (the candidate's own Gradle build leaves a 1-minute load of 10+ for a few minutes).
+# Prints the reason and succeeds when the host is too busy. It never waits for the load to
+# fall: the worker either takes the run or it doesn't, and a busy fallback is a refusal.
 local_host_busy() {
   if command -v docker >/dev/null && docker ps --format '{{.Names}}' 2>/dev/null | awk '/FORGEJO-ACTIONS-TASK/ { found=1 } END { exit !found }'; then
     echo "Forgejo CI is still using the host; wait for its deploy before a local device regression"
     return 0
   fi
-  local load max top waited=0 patience
+  local load max top
   max="${ATLAS_ANDROID_MAX_LOCAL_LOAD:-3}"
-  patience="${ATLAS_ANDROID_LOAD_WAIT_SECONDS:-600}"
-  while :; do
-    load="$(cut -d' ' -f1 /proc/loadavg)"
-    awk -v current="$load" -v limit="$max" 'BEGIN { exit !(current > limit) }' || return 1
-    top="$(ps -eo pcpu=,comm= --sort=-pcpu | awk '$2 != "ps"' | head -3 | awk '{ printf "%s%s (%s%%)", sep, $2, $1; sep=", " }')"
-    if ((waited >= patience)); then
-      echo "this host's 1-minute load is still $load after ${waited} s (limit $max; busiest: $top); a local emulator drops input under that load. Wait, use the Ally-X worker, or raise ATLAS_ANDROID_MAX_LOCAL_LOAD"
-      return 0
-    fi
-    echo "waiting for this host's 1-minute load ($load) to fall below $max; busiest: $top" >&2
-    sleep 30
-    waited=$((waited + 30))
-  done
+  load="$(cut -d' ' -f1 /proc/loadavg)"
+  awk -v current="$load" -v limit="$max" 'BEGIN { exit !(current > limit) }' || return 1
+  top="$(ps -eo pcpu=,comm= --sort=-pcpu | awk '$2 != "ps"' | head -3 | awk '{ printf "%s%s (%s%%)", sep, $2, $1; sep=", " }')"
+  echo "this host's 1-minute load is $load (limit $max; busiest: $top); a local emulator drops input under that load. Rerun when it is quiet, or raise ATLAS_ANDROID_MAX_LOCAL_LOAD"
 }
 # Fail before building a candidate that could only be tested on a busy local host.
 if [[ "$backend" == local ]] && reason="$(local_host_busy)"; then
@@ -157,7 +148,7 @@ fi
 if [[ "$backend" != local && -x "$worker" ]]; then
   echo "Android regression backend: trying ally-x"
   set +e
-  "$worker" session --avd atlas_test --apk "$apk" --reverse 3199 \
+  "$worker" session --avd atlas_test --apk "$apk" --reverse 3199 --uiautomator2 \
     --results "$app_dir/e2e/artifacts/ally-x" -- node "$app_dir/e2e/regression.mjs"
   worker_status=$?
   set -e
