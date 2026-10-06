@@ -187,6 +187,9 @@ before that destination. Also:
   (the Weather group, Points of interest, Base map) are absent from `uiautomator dump`. Use
   `tapQuickLayer(id)` in `regression.mjs`, which scrolls within the visible `layer-quick-*`
   rows' bounds; a plain `tap()` of a foot row times out (v0.229.0's first POI run).
+- **System Settings starts with updates and source health.** The server-origin field can be below
+  the sheet's visible area even with healthy sources collapsed. Scroll to `server-origin` before
+  entering a fixture URL; `waitForId` alone will time out on an off-screen field.
 - **Tapping a backdrop "by id" taps its centre**, which is under the menu it backs, so it hits a
   menu row or header. Dismiss by tapping near the top of the screen — `closeQuickLayerMenu()`.
 - **The Layers button does not exist after `configureFixtureServer()`.** The fixture answers

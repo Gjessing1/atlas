@@ -541,7 +541,9 @@ async function configureFixtureServer() {
   await openMenuItem('open-settings');
   await waitForId('settings-sheet');
   await tapAfterScroll('settings-open-system', 'settings-sheet');
-  await waitForId('server-origin');
+  // System now starts with the frequent update action and any unhealthy
+  // sources. Server is below them; scroll inside the sheet to reach its field.
+  await tapAfterScroll('server-origin', 'settings-sheet');
   await replaceText('server-origin', FIXTURE_ORIGIN);
   await tap('server-save');
   await waitFor(

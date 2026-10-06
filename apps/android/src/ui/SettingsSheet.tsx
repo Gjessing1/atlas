@@ -695,6 +695,7 @@ const HEALTH_COLOR: Record<UpstreamHealth, string> = {
 function StatusSection({ visible }: { visible: boolean }) {
   const origin = useServerOrigin();
   const status = useStatus(origin, visible);
+  const [showAllSources, setShowAllSources] = useState(false);
   const sources = status.data?.sources ?? [];
   const affected = sources
     .filter((source) => source.health === 'down' || source.health === 'degraded')
@@ -762,7 +763,20 @@ function StatusSection({ visible }: { visible: boolean }) {
         <Text style={styles.error}>Status unavailable — {status.error}.</Text>
       ) : null}
       {!status.data && !status.error ? <Text style={styles.muted}>Loading…</Text> : null}
-      {status.data
+      {status.data && other.length > 0 ? (
+        <Pressable
+          style={[styles.button, styles.buttonQuiet]}
+          onPress={() => setShowAllSources((current) => !current)}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: showAllSources }}
+          testID="status-show-sources"
+        >
+          <Text style={styles.buttonQuietText}>
+            {showAllSources ? 'Hide' : 'Show'} other {other.length} data sources
+          </Text>
+        </Pressable>
+      ) : null}
+      {status.data && showAllSources
         ? groupUpstreams(other).map(([group, sources]) => (
             <View key={group} style={styles.statusGroup}>
               <Text style={styles.statusGroupName}>{group}</Text>
@@ -770,7 +784,7 @@ function StatusSection({ visible }: { visible: boolean }) {
             </View>
           ))
         : null}
-      {status.data ? (
+      {status.data && showAllSources ? (
         <>
           <Text style={styles.muted}>{sweepSummary(status.data)}</Text>
           <Text style={styles.muted}>
