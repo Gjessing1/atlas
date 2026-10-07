@@ -32,7 +32,8 @@ services:
 
 networks:
   # Shared with the self-hosted services — photon (infrastructure/photon),
-  # valhalla (infrastructure/valhalla) and postgres (infrastructure/postgres),
+  # valhalla (infrastructure/valhalla) and postgres (template in
+  # infrastructure/postgres, run from the deploy dir's atlas-postgres/),
   # each brought up from its own directory:
   #   docker network create atlas
   atlas:
