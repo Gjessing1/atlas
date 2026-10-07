@@ -36,37 +36,10 @@ Atlas should be the place a trip is planned, kept and sent from: draw a route qu
 again months later, and put it on the watch without opening Garmin Connect. UI and UX carry this
 section — every item is judged by how few taps and how little guessing a real trip takes, on a
 phone outdoors as much as on a desk. Garmin's course library (list, rename, sport, delete, send
-to watch, save to Atlas) and sport-filed activity import shipped in v0.249.0. Collections now
-has a Garmin pane for remote courses, imported activities and manually imported Explore locations.
-What remains:
-
-### 1.1 Waypoint editing on the map
-
-- [ ] **Make dropping, moving and removing route points direct on the map, on both platforms.**
-      Today stops come from search, place cards and long-press; web can drag stop markers and
-      click the line to insert a via point (`viaInsertIndex`), Android edits stops mostly from
-      the list. Planning a hike or run means shaping a line, so the map itself must be the
-      editor:
-
-      - **Add:** tap empty map in planning mode appends a point (no menu); tap *on* the routed
-        line inserts a via point in that leg, not at the end. A point dropped far from any path
-        says so on the leg instead of silently detouring.
-      - **Move:** drag any point on Android as on web, with the leg previews re-routing live
-        (debounced) while the finger moves; drop snaps to the nearest routable way.
-      - **Remove:** tap a point → small popover with *Remove*, *Make start/finish*, *Name it*,
-        *Straight line to next* — no trip to the list.
-      - **Leg modes:** per-leg *follow paths* vs *straight line* (off-trail ridge, lake ice,
-        beach), drawn dashed, counted in distance; elevation sampled along straight legs too.
-      - **Undo/redo** for every point edit (a mis-drop on a phone must cost one tap), kept until
-        the plan is cleared.
-      - **Point density:** routed legs stay few points (Valhalla), but an imported or
-        Garmin-course line edited in the planner (`trackToRoutePoints`, capped at 24) must let
-        the user add points where the cap smoothed a bend away.
-
-      Done when a 10-point loop can be built, reshaped and trimmed with the map alone on a
-      390 px phone and on desktop; Android regression and a web e2e drive the add / insert /
-      drag / remove / undo path. Keep the keyboard/TalkBack alternative from 4.3 in step — the
-      list stays the accessible route to every map gesture.
+to watch, save to Atlas) and sport-filed activity import shipped in v0.249.0. Map-first waypoint
+editing (add/insert/drag/remove, point menu, direct legs, undo/redo) and editing a Garmin course's
+line with create-then-confirm-delete replacement shipped in v0.254.0, when the Garmin tab was
+dissolved into Routes & courses, Activities and Places. What remains:
 
 ### 1.2 One library for places, tracks, courses and activities
 
@@ -75,13 +48,12 @@ What remains:
       live in Collections' folder tree today; finding "that ridge run from last summer" means
       knowing which folder it fell into. Design the library around how it is looked for:
 
-      - **Views over the same records:** Folders, Places, Routes & courses, Activities and Garmin now
-        exist on both clients. Garmin has remote-only courses, imported activities and Explore GPX
-        locations. Activity sport/year filters and show-matching-tracks action also exist; on
-        Android (v0.253.0) the views are a fixed tab bar, the filters are Sport ▾ / Year ▾ menus,
-        rows are one line each, and Garmin is a status pane (activities, locations, courses) rather
-        than a second activity list. Still needed: the same on web, plan-profile sport for Atlas
-        routes, and sort by distance or proximity to the map view.
+      - **Views over the same records:** Folders, Places, Routes & courses and Activities exist on
+        both clients. Garmin has no tab of its own (v0.254.0): its remote courses list under Routes
+        & courses, the import status/check sits atop Activities, Explore GPX locations under
+        Places. Sport/year filters, a per-view Show all / Hide all and Show only these exist; iNatur
+        permit areas (old saves included) are kept out of Routes & courses. Still needed:
+        plan-profile sport for Atlas routes, and sort by distance or proximity to the map view.
       - **Rows that answer the question:** name, sport, distance · ascent · date, and a tiny
         line or pin thumbnail; places show category and distance from you.
       - **Map-synced list:** scrolling or filtering highlights the matching lines/pins on the
@@ -99,12 +71,11 @@ What remains:
 
 ### 1.3 Garmin — finish the round trip
 
-- [ ] **Edit a Garmin course's route in Atlas and replace it on Garmin.** Rename, sport and
-      delete exist; reshaping the line does not. Flow: course row → *Edit route* (saves to Atlas
-      if needed, opens it in the planner via `trackToRoutePoints`) → reshape (1.1) → *Update on
-      Garmin*, which creates the new course and, after an explicit confirm, deletes the old one
-      — Garmin's PUT cannot replace geometry safely, and a create-then-delete keeps a working
-      course on the account if either step fails. Re-send to the same watch in the same step.
+- [ ] **Verify course replacement against the live account.** v0.254.0's *Edit route → Update
+      on Garmin* is tested against mocks only: confirm on the real account that `sportOf` keeps
+      the sport (ice skating 168 included), that the new course queues to the watch, and that the
+      old one deletes after the post-create "not yet ready" window. Needs the user's approval for
+      writes to their account.
 - [ ] **Verify what a Connect-side delete or rename does on the watch itself.** The API calls
       are verified (2026-10-04: list `/web-gateway/course/owner/`, GPX `/course-service/course/gpx/{id}`,
       PUT and DELETE `/course-service/course/{id}`, which answers 429 "not yet ready" for ~10 s

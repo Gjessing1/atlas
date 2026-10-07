@@ -228,7 +228,9 @@ export function useMapPress({
           const path = route.paths?.[route.selectedPath];
           if (path && !route.roundTrip && route.waypoints.length >= 2) {
             const hits = await mapRef.current
-              ?.queryRenderedFeatures(pixelBounds, { layers: [PLAN_LINE_LAYER_ID] })
+              ?.queryRenderedFeatures(pixelBounds, {
+                layers: [PLAN_LINE_LAYER_ID, 'atlas-plan-straight'],
+              })
               .catch(() => undefined);
             if (hits && hits.length > 0) {
               const at = { lat, lng };

@@ -819,6 +819,35 @@ describe('useUserData', () => {
     expect(result.current.collections.find((item) => item.id === folderId)?.visible).toBe(true);
   });
 
+  it('shows or hides one view of tracks without touching the others', async () => {
+    const { platform } = createPlatform();
+    const { result } = renderHook(() => useUserData(platform));
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    let folderId = '';
+    await act(async () => {
+      folderId = (await result.current.createCollection('Garmin courses'))!.id;
+      await result.current.importFiles([gpxFile('a.gpx'), gpxFile('b.gpx'), gpxFile('c.gpx')]);
+    });
+    const [a, b, c] = result.current.tracks;
+    await act(async () => {
+      await result.current.updateTrack(a!.id, { collectionId: folderId, visible: false });
+      await result.current.updateTrack(b!.id, { visible: false });
+      await result.current.setCollectionVisible(folderId, false);
+    });
+    await act(async () => {
+      await result.current.setTracksVisible([a!.id, b!.id], true);
+    });
+    const visible = (id: string) => result.current.tracks.find((item) => item.id === id)?.visible;
+    expect([visible(a!.id), visible(b!.id), visible(c!.id)]).toEqual([true, true, true]);
+    expect(result.current.collections.find((item) => item.id === folderId)?.visible).toBe(true);
+    await act(async () => {
+      await result.current.setTracksVisible([a!.id, b!.id], false);
+    });
+    expect([visible(a!.id), visible(b!.id), visible(c!.id)]).toEqual([false, false, true]);
+    // Hiding leaves folders alone: other things in them stay as they were.
+    expect(result.current.collections.find((item) => item.id === folderId)?.visible).toBe(true);
+  });
+
   describe('storage lifecycle', () => {
     it('closes the storage on unmount', async () => {
       const { storage, platform } = createPlatform();

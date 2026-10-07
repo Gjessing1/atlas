@@ -29,6 +29,7 @@ import {
   folderHasPinLabels,
   garminSportIcon,
   tagHasPinLabels,
+  visibleOnMap,
   type CollectionRevealTarget,
 } from '@atlas/core';
 import type {
@@ -69,14 +70,17 @@ const PLACE_PAGE = 40;
 /** The folder a Garmin Explore waypoint export is filed into. */
 const GARMIN_LOCATIONS = 'Garmin locations';
 
-type CollectionsView = LibraryView | 'garmin';
+/**
+ * Garmin has no tab of its own: its courses are routes, its recordings activities and its
+ * watch locations places, so each is found where that kind of thing is looked for.
+ */
+type CollectionsView = LibraryView;
 
 const VIEW_LABELS: Record<CollectionsView, string> = {
   folders: 'Folders',
   places: 'Places',
   courses: 'Routes',
   activities: 'Activities',
-  garmin: 'Garmin',
 };
 
 /** "14:05" today, otherwise "3 Oct". */
@@ -475,6 +479,7 @@ export function FavoritesSheet({
   garmin,
   onRevealGarminItem,
   onShowGarminTrack,
+  onEditGarminCourse,
   revealItem,
   onRevealed,
   onClose,
@@ -499,6 +504,7 @@ export function FavoritesSheet({
   onDeleteFolder,
   onSetAllVisible,
   onShowOnlyTracks,
+  onSetTracksVisible,
   onExportAll,
   onImport,
   onImportInatur,
@@ -509,6 +515,7 @@ export function FavoritesSheet({
   garmin: GarminState;
   onRevealGarminItem: (target: CollectionRevealTarget) => void;
   onShowGarminTrack: (id: string) => void;
+  onEditGarminCourse: (id: string) => void;
   revealItem?: CollectionRevealTarget | null;
   onRevealed?: () => void;
   onClose: () => void;
@@ -540,6 +547,8 @@ export function FavoritesSheet({
   /** Show or hide every place and folder at once (header toggle). */
   onSetAllVisible: (visible: boolean) => void;
   onShowOnlyTracks: (ids: string[]) => void;
+  /** Show or hide just these tracks (the Routes or Activities list), leaving the rest. */
+  onSetTracksVisible: (ids: string[], visible: boolean) => void;
   /** Export everything as a file — also in Settings → Account & data. */
   onExportAll: () => void;
   /** Pick files and import them; returns a per-run summary (null if cancelled). */
@@ -662,6 +671,11 @@ export function FavoritesSheet({
     [filtered.tracks, view, sport, year],
   );
   const sports = useMemo(() => librarySportCounts(viewSource), [viewSource]);
+  // A listed track the map does not draw, by its own eye or a hidden folder above it.
+  const listedHidden = useMemo(() => {
+    const drawn = new Set(visibleOnMap(tracks, collections).map((track) => track.id));
+    return viewTracks.some((track) => !drawn.has(track.id));
+  }, [viewTracks, tracks, collections]);
   const years = useMemo(() => activityYearCounts(viewSource), [viewSource]);
   // Tab counts are of everything saved, so a filter typed on one tab does not
   // make another look empty.
@@ -1398,6 +1412,25 @@ export function FavoritesSheet({
             {viewTracks.length !== 1 ? noun : view === 'activities' ? 'activity' : 'route'}
             {view === 'activities' ? ', newest first' : ''}
           </Text>
+        </View>
+        <View style={styles.summaryRow}>
+          <Pressable
+            style={viewTracks.length === 0 && styles.buttonDisabled}
+            disabled={viewTracks.length === 0}
+            onPress={() =>
+              onSetTracksVisible(
+                viewTracks.map((track) => track.id),
+                listedHidden,
+              )
+            }
+            hitSlop={10}
+            accessibilityLabel={
+              listedHidden ? `Show all these ${noun} on the map` : `Hide all these ${noun}`
+            }
+            testID="library-toggle-visible"
+          >
+            <Text style={styles.link}>{listedHidden ? 'Show all' : 'Hide all'}</Text>
+          </Pressable>
           <Pressable
             style={viewTracks.length === 0 && styles.buttonDisabled}
             disabled={viewTracks.length === 0}
@@ -1406,7 +1439,7 @@ export function FavoritesSheet({
             accessibilityLabel={`Show only these ${noun} on the map`}
             testID="library-show-only-matches"
           >
-            <Text style={styles.link}>Show only these on map</Text>
+            <Text style={styles.link}>Show only these</Text>
           </Pressable>
         </View>
       </View>
@@ -1428,147 +1461,125 @@ export function FavoritesSheet({
       return <Text style={styles.muted}>Nothing matches these filters.</Text>;
     }
     const garminHint = garmin.connected
-      ? 'Import them from your Garmin account on the Garmin tab.'
+      ? 'Tap ↻ above to import them from Garmin.'
       : 'Connect Garmin in Settings → Garmin to bring them in, or import GPX files.';
     return (
       <View style={styles.emptyBlock}>
         <Text style={styles.muted}>
           {view === 'activities'
             ? `No activities yet. ${garminHint}`
-            : 'No routes yet. Save one from the route planner, import a GPX file, or save a Garmin course.'}
+            : garmin.connected
+              ? 'No routes in Atlas yet. Save one from the route planner or import a GPX file; your Garmin courses are below.'
+              : 'No routes yet. Save one from the route planner or import a GPX file.'}
         </Text>
-        {garmin.connected ? (
-          <Pressable
-            style={[styles.button, styles.buttonQuiet, styles.emptyButton]}
-            onPress={() => showView('garmin')}
-          >
-            <Text style={styles.buttonQuietText}>Open Garmin</Text>
-          </Pressable>
-        ) : null}
       </View>
     );
   };
 
-  /**
-   * Garmin Connect as one place: what has come in (activities, watch locations)
-   * and the course library that lives on Garmin's side. The imported tracks
-   * themselves are browsed on the Activities and Routes tabs, which have the
-   * sport and year filters — this tab used to list all of them a second time,
-   * unfiltered, above the locations nobody then scrolled down to.
-   */
-  const renderGarmin = (): ReactNode => {
+  /** Atop Activities: what has come in from Garmin, and a check for more. */
+  const garminActivitiesCard = (): ReactNode => {
     const newest = activities[0] ? activityDate(activities[0]) : null;
-    const locationPlaces = garminLocations
-      ? places.filter((place) => place.collectionId === garminLocations.id)
-      : [];
     const last = garmin.lastImport;
     return (
-      <View testID="garmin-library">
+      <View style={styles.card} testID="garmin-library">
         {garmin.error ? <Text style={styles.error}>{garmin.error}</Text> : null}
-        <View style={styles.card}>
-          <View style={styles.cardHead}>
-            <Text style={styles.cardTitle}>Activities</Text>
-            <View style={styles.cardActions}>
-              {/* Checking is what the schedule does by itself; by hand it is a
-                  small refresh, not the screen's main button. */}
-              <Pressable
-                style={[styles.iconButton, garmin.busy && styles.buttonDisabled]}
-                disabled={garmin.busy}
-                onPress={() => void garmin.checkNewActivities()}
-                hitSlop={8}
-                accessibilityLabel="Check Garmin for new activities"
-                testID="garmin-check-newest"
-              >
-                {garmin.busy ? (
-                  <ActivityIndicator size="small" color={theme.accent} />
-                ) : (
-                  <Text style={styles.iconButtonText}>↻</Text>
-                )}
-              </Pressable>
-              {activities.length > 0 ? (
-                <Pressable
-                  onPress={() => showView('activities')}
-                  hitSlop={10}
-                  testID="garmin-browse-activities"
-                >
-                  <Text style={styles.link}>Browse ›</Text>
-                </Pressable>
-              ) : null}
-            </View>
-          </View>
-          <Text style={styles.muted}>
-            {activities.length > 0
-              ? `${activities.length} in Atlas${newest ? ` · newest ${recordedLabel(newest)}` : ''}`
-              : 'None yet. Tap ↻ to import; GPS activities are filed by sport.'}
-            {garmin.lastActivityCheck ? ` · checked ${fmtCheckTime(garmin.lastActivityCheck)}` : ''}
-          </Text>
-          {last ? (
-            <Text style={styles.muted} testID="garmin-import-result">
-              {last.imported > 0
-                ? `Added ${last.imported} ${last.imported === 1 ? 'activity' : 'activities'}`
-                : 'Nothing new'}
-              {last.errors > 0 ? ` · ${last.errors} failed` : ''}
-              {last.sorted > 0 ? ` · filed ${last.sorted} into sport folders` : ''}
-            </Text>
-          ) : null}
-          {/* Each check also reaches further back until the whole history is in. */}
-          {activities.length > 0 ? (
-            <Text style={styles.muted} testID="garmin-history-status">
-              {garmin.historyComplete
-                ? 'Whole Garmin history imported.'
-                : garmin.nextActivityOffset > 0
-                  ? `Older history: ${garmin.nextActivityOffset} checked so far, more with each check.`
-                  : 'Older history is filled in with each check.'}
-            </Text>
-          ) : null}
-          <Text style={styles.muted} testID="garmin-auto-status">
-            {garmin.autoImport === 'off'
-              ? 'Automatic import is off (Settings → Garmin).'
-              : `Checks by itself ${garmin.autoImport === 'daily' ? 'daily' : 'every 6 hours'}.`}
-          </Text>
-        </View>
-        <View style={styles.card}>
-          <View style={styles.cardHead}>
-            <Text style={styles.cardTitle}>Saved locations</Text>
-            {garminLocations ? (
-              <Pressable
-                onPress={() => {
-                  showView('folders');
-                  openFolder(garminLocations.id);
-                }}
-                hitSlop={10}
-                testID="garmin-locations-open"
-              >
-                <Text style={styles.link}>Open folder ›</Text>
-              </Pressable>
-            ) : null}
-          </View>
-          <Text style={styles.muted}>
-            {locationPlaces.length > 0 ? `${locationPlaces.length} in ${GARMIN_LOCATIONS}. ` : ''}
-            Atlas can’t read watch locations from Garmin yet. Export them as GPX from Garmin Explore
-            and import the file here.
-          </Text>
-          <View style={styles.buttonRow}>
+        <View style={styles.cardHead}>
+          <Text style={styles.cardTitle}>From Garmin Connect</Text>
+          <View style={styles.cardActions}>
+            {/* Checking is what the schedule does by itself; by hand it is a
+                small refresh, not the screen's main button. */}
             <Pressable
-              style={[styles.button, styles.buttonQuiet]}
-              onPress={() =>
-                void onImport(
-                  garminLocations
-                    ? { collectionId: garminLocations.id }
-                    : { newCollection: { name: GARMIN_LOCATIONS } },
-                )
-              }
-              testID="garmin-locations-import"
+              style={[styles.iconButton, garmin.busy && styles.buttonDisabled]}
+              disabled={garmin.busy}
+              onPress={() => void garmin.checkNewActivities()}
+              hitSlop={8}
+              accessibilityLabel="Check Garmin for new activities"
+              testID="garmin-check-newest"
             >
-              <Text style={styles.buttonQuietText}>Import GPX</Text>
+              {garmin.busy ? (
+                <ActivityIndicator size="small" color={theme.accent} />
+              ) : (
+                <Text style={styles.iconButtonText}>↻</Text>
+              )}
             </Pressable>
           </View>
         </View>
-        <GarminCourses
-          garmin={garmin}
-          onReveal={onRevealGarminItem}
-          onShowTrack={onShowGarminTrack}
-        />
+        <Text style={styles.muted}>
+          {activities.length > 0
+            ? `${activities.length} in Atlas${newest ? ` · newest ${recordedLabel(newest)}` : ''}`
+            : 'None yet. Tap ↻ to import; GPS activities are filed by sport.'}
+          {garmin.lastActivityCheck ? ` · checked ${fmtCheckTime(garmin.lastActivityCheck)}` : ''}
+        </Text>
+        {last ? (
+          <Text style={styles.muted} testID="garmin-import-result">
+            {last.imported > 0
+              ? `Added ${last.imported} ${last.imported === 1 ? 'activity' : 'activities'}`
+              : 'Nothing new'}
+            {last.errors > 0 ? ` · ${last.errors} failed` : ''}
+            {last.sorted > 0 ? ` · filed ${last.sorted} into sport folders` : ''}
+          </Text>
+        ) : null}
+        {/* Each check also reaches further back until the whole history is in. */}
+        {activities.length > 0 ? (
+          <Text style={styles.muted} testID="garmin-history-status">
+            {garmin.historyComplete
+              ? 'Whole Garmin history imported.'
+              : garmin.nextActivityOffset > 0
+                ? `Older history: ${garmin.nextActivityOffset} checked so far, more with each check.`
+                : 'Older history is filled in with each check.'}
+          </Text>
+        ) : null}
+        <Text style={styles.muted} testID="garmin-auto-status">
+          {garmin.autoImport === 'off'
+            ? 'Automatic import is off (Settings → Garmin).'
+            : `Checks by itself ${garmin.autoImport === 'daily' ? 'daily' : 'every 6 hours'}.`}
+        </Text>
+      </View>
+    );
+  };
+
+  /** Under Places: watch locations come in as a Garmin Explore GPX export. */
+  const garminLocationsCard = (): ReactNode => {
+    const locationPlaces = garminLocations
+      ? places.filter((place) => place.collectionId === garminLocations.id)
+      : [];
+    return (
+      <View style={styles.card}>
+        <View style={styles.cardHead}>
+          <Text style={styles.cardTitle}>Garmin saved locations</Text>
+          {garminLocations ? (
+            <Pressable
+              onPress={() => {
+                showView('folders');
+                openFolder(garminLocations.id);
+              }}
+              hitSlop={10}
+              testID="garmin-locations-open"
+            >
+              <Text style={styles.link}>Open folder ›</Text>
+            </Pressable>
+          ) : null}
+        </View>
+        <Text style={styles.muted}>
+          {locationPlaces.length > 0 ? `${locationPlaces.length} in ${GARMIN_LOCATIONS}. ` : ''}
+          Atlas can’t read watch locations from Garmin yet. Export them as GPX from Garmin Explore
+          and import the file here.
+        </Text>
+        <View style={styles.buttonRow}>
+          <Pressable
+            style={[styles.button, styles.buttonQuiet]}
+            onPress={() =>
+              void onImport(
+                garminLocations
+                  ? { collectionId: garminLocations.id }
+                  : { newCollection: { name: GARMIN_LOCATIONS } },
+              )
+            }
+            testID="garmin-locations-import"
+          >
+            <Text style={styles.buttonQuietText}>Import GPX</Text>
+          </Pressable>
+        </View>
       </View>
     );
   };
@@ -1637,15 +1648,7 @@ export function FavoritesSheet({
       ) : null}
 
       <View style={styles.tabBar} accessibilityRole="tablist">
-        {(
-          [
-            'folders',
-            'places',
-            'courses',
-            'activities',
-            ...(garmin.connected ? (['garmin'] as const) : []),
-          ] as const
-        ).map((item) => (
+        {(['folders', 'places', 'courses', 'activities'] as const).map((item) => (
           <Pressable
             key={item}
             style={[styles.tab, view === item && styles.tabOn]}
@@ -1664,47 +1667,45 @@ export function FavoritesSheet({
           </Pressable>
         ))}
       </View>
-      {view !== 'garmin' ? (
-        <View style={styles.filterRow}>
-          <TextInput
-            style={[styles.textField, styles.filterInput]}
-            value={filter}
-            onChangeText={(text) => {
-              setFilter(text);
-              setTrackLimit(TRACK_PAGE);
-              setPlaceLimit(PLACE_PAGE);
-            }}
-            placeholder={
-              view === 'folders'
-                ? 'Filter by name, #tag or notes'
-                : `Filter ${VIEW_LABELS[view].toLocaleLowerCase()}`
-            }
-            autoCapitalize="none"
-            autoCorrect={false}
-            returnKeyType="search"
-            accessibilityLabel="Filter collections"
-            testID="collections-filter"
+      <View style={styles.filterRow}>
+        <TextInput
+          style={[styles.textField, styles.filterInput]}
+          value={filter}
+          onChangeText={(text) => {
+            setFilter(text);
+            setTrackLimit(TRACK_PAGE);
+            setPlaceLimit(PLACE_PAGE);
+          }}
+          placeholder={
+            view === 'folders'
+              ? 'Filter by name, #tag or notes'
+              : `Filter ${VIEW_LABELS[view].toLocaleLowerCase()}`
+          }
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="search"
+          accessibilityLabel="Filter collections"
+          testID="collections-filter"
+        />
+        {filterTag !== null ? (
+          <PinLabelToggle
+            on={tagHasPinLabels(pinLabels.prefs, filterTag)}
+            what={`#${filterTag}`}
+            onToggle={() => void pinLabels.toggleTag(filterTag)}
+            testID="collections-filter-labels"
           />
-          {filterTag !== null ? (
-            <PinLabelToggle
-              on={tagHasPinLabels(pinLabels.prefs, filterTag)}
-              what={`#${filterTag}`}
-              onToggle={() => void pinLabels.toggleTag(filterTag)}
-              testID="collections-filter-labels"
-            />
-          ) : null}
-          {filtered.active ? (
-            <Pressable
-              style={[styles.button, styles.buttonQuiet]}
-              onPress={() => setFilter('')}
-              accessibilityLabel="Clear filter"
-              testID="collections-filter-clear"
-            >
-              <Text style={styles.buttonQuietText}>✕</Text>
-            </Pressable>
-          ) : null}
-        </View>
-      ) : null}
+        ) : null}
+        {filtered.active ? (
+          <Pressable
+            style={[styles.button, styles.buttonQuiet]}
+            onPress={() => setFilter('')}
+            accessibilityLabel="Clear filter"
+            testID="collections-filter-clear"
+          >
+            <Text style={styles.buttonQuietText}>✕</Text>
+          </Pressable>
+        ) : null}
+      </View>
       {view === 'courses' || view === 'activities' ? libraryFilters() : null}
       {view === 'folders' && !filtered.active && current ? folderHeader(current.folder) : null}
 
@@ -1724,19 +1725,27 @@ export function FavoritesSheet({
         {view === 'folders' && filtered.active && filtered.empty ? (
           <Text style={styles.muted}>Nothing here matches “{filter.trim()}”.</Text>
         ) : null}
+        {view === 'activities' && garmin.connected ? garminActivitiesCard() : null}
         {view === 'folders'
           ? filtered.active
             ? renderResults()
             : renderLevel()
-          : view === 'garmin'
-            ? renderGarmin()
-            : view === 'places'
-              ? filtered.places.length > 0
-                ? renderPlaces(filtered.places, true)
-                : libraryEmpty()
-              : viewTracks.length > 0
-                ? renderTracks(viewTracks, true)
-                : libraryEmpty()}
+          : view === 'places'
+            ? filtered.places.length > 0
+              ? renderPlaces(filtered.places, true)
+              : libraryEmpty()
+            : viewTracks.length > 0
+              ? renderTracks(viewTracks, true)
+              : libraryEmpty()}
+        {view === 'places' && garmin.connected ? garminLocationsCard() : null}
+        {view === 'courses' && garmin.connected ? (
+          <GarminCourses
+            garmin={garmin}
+            onReveal={onRevealGarminItem}
+            onShowTrack={onShowGarminTrack}
+            onEditRoute={onEditGarminCourse}
+          />
+        ) : null}
         <View style={styles.listFoot} />
       </ScrollView>
     </BottomSheet>

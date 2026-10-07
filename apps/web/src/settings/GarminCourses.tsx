@@ -12,6 +12,7 @@ import {
   type GarminCourseSport,
 } from '@atlas/core';
 import { useEffect, useState } from 'react';
+import { GarminReplaceConfirm } from './GarminCourseEdit.js';
 
 /**
  * The Garmin Connect course library: browse by sport, and per course save a copy into Atlas,
@@ -21,9 +22,12 @@ import { useEffect, useState } from 'react';
 export function GarminCourses({
   garmin,
   onReveal,
+  onEditRoute,
 }: {
   garmin: GarminState;
   onReveal: (target: CollectionRevealTarget) => void;
+  /** Reshape the course in the planner; it is replaced on Garmin from there. */
+  onEditRoute: (id: string) => void;
 }) {
   const [sport, setSport] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -89,6 +93,7 @@ export function GarminCourses({
           choose Send to Garmin.
         </p>
       )}
+      {garmin.replacement && <GarminReplaceConfirm garmin={garmin} />}
       <ul className="garmin-course-list">
         {shown.map((course) => {
           const expanded = openId === course.id;
@@ -156,6 +161,9 @@ export function GarminCourses({
                         Save &amp; show on map
                       </button>
                     )}
+                    <button type="button" disabled={pending} onClick={() => onEditRoute(course.id)}>
+                      Edit route
+                    </button>
                     {garmin.devices.length > 1 && (
                       <select
                         aria-label="Garmin device"

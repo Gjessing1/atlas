@@ -3,6 +3,7 @@ import { expect, it } from 'vitest';
 import {
   activityYear,
   activityYearCounts,
+  isAreaTrack,
   librarySportCounts,
   libraryTrackKind,
   libraryTrackLine,
@@ -93,4 +94,18 @@ it('says each fact about a track once on its row', () => {
   };
   expect(libraryTrackLine(course, now)).toBe('Garmin course · Hiking · 9.8 km');
   expect(libraryTrackTags(track('own', ['hunt'], '', 1))).toEqual(['hunt']);
+});
+
+it('keeps iNatur permit areas, old saves included, out of Routes & courses', () => {
+  const legacy = { ...track('legacy', [], '', 1), name: 'iNatur – Delområde Sleikebekk' };
+  const tagged = track('tagged', ['iNatur permit'], '', 2);
+  const overlay: TrackRecord = {
+    ...track('overlay', [], '', 3),
+    area: { kind: 'area', source: 'inatur', sourceId: 'x', polygons: [], bbox: [0, 0, 1, 1] },
+  };
+  const route = track('ridge', [], '', 4);
+  expect(
+    libraryTracks([legacy, tagged, overlay, route], 'courses', null, null).map((t) => t.id),
+  ).toEqual(['ridge']);
+  expect([legacy, tagged, overlay, route].map(isAreaTrack)).toEqual([true, true, true, false]);
 });

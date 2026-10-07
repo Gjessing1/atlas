@@ -13,6 +13,7 @@ import {
 import { useEffect, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { FilterMenu } from './FilterMenu';
+import { GarminReplaceConfirm } from './GarminCourseEdit';
 import { theme } from './theme';
 
 /**
@@ -25,11 +26,14 @@ export function GarminCourses({
   garmin,
   onReveal,
   onShowTrack,
+  onEditRoute,
 }: {
   garmin: GarminState;
   onReveal: (target: CollectionRevealTarget) => void;
   /** Close Settings and draw the saved copy on the map, framed. */
   onShowTrack: (trackId: string) => void;
+  /** Reshape the course in the planner; it is replaced on Garmin from there. */
+  onEditRoute: (id: string) => void;
 }) {
   const [sport, setSport] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -97,6 +101,7 @@ export function GarminCourses({
           choose Send to Garmin.
         </Text>
       ) : null}
+      {garmin.replacement ? <GarminReplaceConfirm garmin={garmin} /> : null}
       <View style={shown.length > 0 ? styles.list : null}>
         {shown.map((course, index) => {
           const expanded = openId === course.id;
@@ -169,6 +174,14 @@ export function GarminCourses({
                         <Text style={styles.quietText}>In Collections</Text>
                       </Pressable>
                     ) : null}
+                    <Pressable
+                      style={[styles.button, styles.quiet, pending && styles.disabled]}
+                      disabled={pending}
+                      onPress={() => onEditRoute(course.id)}
+                      testID="garmin-course-edit-route"
+                    >
+                      <Text style={styles.quietText}>Edit route</Text>
+                    </Pressable>
                     {garmin.devices.length > 0 ? (
                       <Pressable
                         style={[styles.button, styles.quiet, pending && styles.disabled]}

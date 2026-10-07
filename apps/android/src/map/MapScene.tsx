@@ -42,6 +42,8 @@ import {
 import type { PlaceRecord } from '@atlas/storage';
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, TextInput } from 'react-native';
+import type { RoutePath } from '@atlas/routing';
 
 import type { HuntingFields } from '../layers/useHuntingFields';
 import type { OverlayLabelData } from '../layers/useOverlayLabels';
@@ -103,6 +105,24 @@ function selectedRegionGeoJSON(bbox: BBox) {
 
 /** Layer id of the planned-route line — App hit-tests taps on it to insert vias. */
 export const PLAN_LINE_LAYER_ID = 'atlas-plan-line';
+
+function plannedRouteSections(path: RoutePath): GeoJSON.FeatureCollection {
+  const straightEdges = new Set<number>();
+  for (const range of path.straightRanges ?? []) {
+    for (let i = range.start; i < range.end; i++) straightEdges.add(i);
+  }
+  const features: GeoJSON.Feature<GeoJSON.LineString>[] = [];
+  let start = 0;
+  while (start < path.points.length - 1) {
+    const straight = straightEdges.has(start);
+    let end = start + 1;
+    while (end < path.points.length - 1 && straightEdges.has(end) === straight) end++;
+    features.push(lineStringFeature(path.points.slice(start, end + 1).map((p) => [p.lng, p.lat])));
+    features[features.length - 1]!.properties = { straight };
+    start = end;
+  }
+  return { type: 'FeatureCollection', features };
+}
 
 /** Fill layer of the Statskog jaktfelt overlay — tapped for the field's identify card. */
 export const HUNT_FIELDS_FILL_LAYER_ID = 'atlas-jaktfelt-fill';
@@ -505,6 +525,20 @@ export function MapScene({
   const transitTrip = transit.guidanceTrip ?? (transit.enabled ? transit.trip : null);
   // The routed line to draw while planning (selected path, primary or alt).
   const planPath = route.paths?.[route.selectedPath] ?? null;
+  const planSections = useMemo(
+    () => (planPath ? plannedRouteSections(planPath) : null),
+    [planPath],
+  );
+  const [selectedWaypointId, setSelectedWaypointId] = useState<number | null>(null);
+  const [pointName, setPointName] = useState('');
+  const selectedWaypoint = route.waypoints.find((waypoint) => waypoint.id === selectedWaypointId);
+  const selectedWaypointIndex = route.waypoints.findIndex(
+    (waypoint) => waypoint.id === selectedWaypointId,
+  );
+  useEffect(() => {
+    if (!planning || (selectedWaypointId !== null && !selectedWaypoint))
+      setSelectedWaypointId(null);
+  }, [planning, selectedWaypointId, selectedWaypoint]);
 
   // Zoom-proportional pin size (web parity, see markerScaleForZoom). Quantized
   // to 0.05 steps so the continuous region events only re-render on real change.
@@ -1927,15 +1961,24 @@ export function MapScene({
           </GeoJSONSource>
         ) : null}
         {/* Planned route (route-planning panel): distinct colour from navigation. */}
-        {!inPip && planning && planPath && !transitTrip ? (
-          <GeoJSONSource
-            id="atlas-plan"
-            data={lineStringFeature(planPath.points.map((p) => [p.lng, p.lat]))}
-          >
+        {!inPip && planning && planSections && !transitTrip ? (
+          <GeoJSONSource id="atlas-plan" data={planSections}>
             <Layer
               type="line"
               id="atlas-plan-line"
+              filter={['!', ['to-boolean', ['get', 'straight']]]}
               paint={{ 'line-color': '#7c3aed', 'line-width': 6, 'line-opacity': 0.85 }}
+            />
+            <Layer
+              type="line"
+              id="atlas-plan-straight"
+              filter={['to-boolean', ['get', 'straight']]}
+              paint={{
+                'line-color': '#7c3aed',
+                'line-width': 6,
+                'line-opacity': 0.85,
+                'line-dasharray': [2, 2],
+              }}
             />
             {/* Travel-direction chevrons — the only cue to which way a round
               trip runs. keep-upright must stay off or right-to-left segments
@@ -1943,6 +1986,7 @@ export function MapScene({
             <Layer
               type="symbol"
               id="atlas-plan-arrows"
+              filter={['!', ['to-boolean', ['get', 'straight']]]}
               layout={{
                 'symbol-placement': 'line',
                 'symbol-spacing': 80,
@@ -2077,12 +2121,21 @@ export function MapScene({
                 lngLat={[w.pos.lng, w.pos.lat]}
                 anchor="bottom"
                 draggable
+                onPress={() => {
+                  setSelectedWaypointId(w.id);
+                  setPointName(w.name ?? '');
+                }}
+                onDragStart={() => setSelectedWaypointId(null)}
+                onDrag={(e) => {
+                  const [lng, lat] = e.nativeEvent.lngLat;
+                  route.previewWaypointMove(w.id, { lat, lng });
+                }}
                 onDragEnd={(e) => {
                   const [lng, lat] = e.nativeEvent.lngLat;
-                  route.moveWaypointTo(w.id, { lat, lng });
+                  route.finishWaypointMove(w.id, { lat, lng });
                 }}
               >
-                <View style={styles.wpMarker}>
+                <View style={styles.wpMarker} testID={`route-map-point-${i}`}>
                   {/* The panel's row and this pin must say the same thing, so
                     both read the one label function. */}
                   <Text style={styles.wpMarkerText}>
@@ -2092,6 +2145,98 @@ export function MapScene({
               </ViewAnnotation>
             ))
           : null}
+        {!inPip && planning && selectedWaypoint && selectedWaypointIndex >= 0 ? (
+          <ViewAnnotation
+            id={`waypoint-actions-${selectedWaypoint.id}`}
+            lngLat={[selectedWaypoint.pos.lng, selectedWaypoint.pos.lat]}
+            anchor="bottom"
+            offset={[0, -32]}
+          >
+            <View style={styles.wpActions}>
+              <Text style={styles.wpActionsTitle}>
+                {selectedWaypoint.name ?? `Point ${selectedWaypointIndex + 1}`}
+              </Text>
+              <View style={styles.wpActionsRow}>
+                <Pressable
+                  accessibilityRole="button"
+                  testID="route-point-remove"
+                  onPress={() => {
+                    route.removeWaypoint(selectedWaypoint.id);
+                    setSelectedWaypointId(null);
+                  }}
+                >
+                  <Text style={styles.wpActionText}>Remove</Text>
+                </Pressable>
+                {selectedWaypointIndex > 0 ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    testID="route-point-start"
+                    onPress={() => {
+                      route.makeStart(selectedWaypoint.id);
+                      setSelectedWaypointId(null);
+                    }}
+                  >
+                    <Text style={styles.wpActionText}>Make start</Text>
+                  </Pressable>
+                ) : null}
+                {selectedWaypointIndex < route.waypoints.length - 1 ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    testID="route-point-finish"
+                    onPress={() => {
+                      route.makeFinish(selectedWaypoint.id);
+                      setSelectedWaypointId(null);
+                    }}
+                  >
+                    <Text style={styles.wpActionText}>Make finish</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+              {!route.roundTrip && selectedWaypointIndex < route.waypoints.length - 1 ? (
+                <Pressable
+                  accessibilityRole="button"
+                  testID="route-point-straight"
+                  onPress={() => {
+                    route.setLegStraight(selectedWaypoint.id, !selectedWaypoint.straightAfter);
+                    setSelectedWaypointId(null);
+                  }}
+                >
+                  <Text style={styles.wpActionText}>
+                    {selectedWaypoint.straightAfter
+                      ? 'Follow paths to next'
+                      : 'Straight line to next'}
+                  </Text>
+                </Pressable>
+              ) : null}
+              <View style={styles.wpActionsRow}>
+                <TextInput
+                  style={styles.wpNameInput}
+                  value={pointName}
+                  onChangeText={setPointName}
+                  placeholder="Name it"
+                  testID="route-point-name"
+                />
+                <Pressable
+                  accessibilityRole="button"
+                  testID="route-point-name-save"
+                  onPress={() => {
+                    route.renameWaypoint(selectedWaypoint.id, pointName);
+                    setSelectedWaypointId(null);
+                  }}
+                >
+                  <Text style={styles.wpActionText}>Save</Text>
+                </Pressable>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                testID="route-point-close"
+                onPress={() => setSelectedWaypointId(null)}
+              >
+                <Text style={styles.wpActionText}>Close</Text>
+              </Pressable>
+            </View>
+          </ViewAnnotation>
+        ) : null}
         <Camera
           ref={cameraRef}
           initialViewState={{
@@ -2259,6 +2404,26 @@ const styles = StyleSheet.create({
     borderColor: '#fff',
   },
   wpMarkerText: { color: '#fff', fontWeight: '800', fontSize: 13 },
+  wpActions: {
+    minWidth: 190,
+    maxWidth: 260,
+    padding: 10,
+    gap: 8,
+    borderRadius: 10,
+    backgroundColor: '#fff',
+    elevation: 8,
+  },
+  wpActionsTitle: { color: '#20202a', fontWeight: '700' },
+  wpActionsRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10 },
+  wpActionText: { color: '#7048c9', fontWeight: '600', paddingVertical: 4 },
+  wpNameInput: {
+    flex: 1,
+    minWidth: 100,
+    borderBottomWidth: 1,
+    borderColor: '#9a8abf',
+    color: '#20202a',
+    padding: 3,
+  },
   navDot: {
     width: 20,
     height: 20,

@@ -2987,6 +2987,84 @@ button.transit-notice-summary {
   cursor: grab;
 }
 
+.route-edit-history {
+  display: flex;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.route-edit-history button {
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.route-edit-history button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.route-leg-tag {
+  color: var(--route);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.route-leg-warnings {
+  color: #a04d00;
+  font-size: 12px;
+}
+.route-leg-warnings p {
+  margin: 3px 0;
+}
+
+.route-list-point-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.route-list-point-actions button,
+.route-list-point-actions input {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.route-list-point-actions button {
+  cursor: pointer;
+}
+
+.route-point-actions {
+  display: grid;
+  gap: 5px;
+  min-width: 160px;
+  color: var(--text);
+}
+
+.route-point-actions button,
+.route-point-actions input {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+}
+
+.route-point-actions button {
+  cursor: pointer;
+}
+
 .editor-actions {
   display: flex;
   gap: 6px;
@@ -9128,6 +9206,12 @@ button.transit-notice-summary {
   align-items: center;
   gap: 5px;
   font-size: 12px;
+}
+
+.library-visibility {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .library-filters select {

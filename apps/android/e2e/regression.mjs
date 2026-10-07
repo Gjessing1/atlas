@@ -791,8 +791,97 @@ async function openRouteFromSavedPlace(placeId) {
   );
 }
 
+/** Exercise the map editor before the ordinary two-stop navigation hand-off. */
+async function editRouteOnMap() {
+  let xml = await waitFor('two map point annotations', hierarchy, (window) =>
+    Boolean(visibleNode(window, 'route-map-point-0') && visibleNode(window, 'route-map-point-1')),
+  );
+  const sheet = visibleNode(xml, 'route-sheet')?.bounds;
+  if (!sheet) throw new Error('Route sheet is missing during map editing');
+  // Add in open map space, then undo back to the original two-stop route.
+  shell(
+    'input',
+    'tap',
+    String(Math.round(sheet.left + sheet.width * 0.16)),
+    String(Math.round(sheet.top * 0.22)),
+  );
+  await waitFor('map tap to add a stop', hierarchy, (window) => stopCount(window) === 3);
+  await tapAfterScroll('route-undo', 'route-scroll', 'down');
+  xml = await waitFor('undo to restore two stops', hierarchy, (window) => stopCount(window) === 2);
+
+  const first = visibleNode(xml, 'route-map-point-0')?.bounds;
+  const second = visibleNode(xml, 'route-map-point-1')?.bounds;
+  if (!first || !second) throw new Error('Route points were not visible for line insertion');
+  const center = (box) => ({ x: (box.left + box.right) / 2, y: (box.top + box.bottom) / 2 });
+  const a = center(first);
+  const b = center(second);
+  shell(
+    'input',
+    'tap',
+    String(Math.round(a.x * 0.25 + b.x * 0.75)),
+    String(Math.round(a.y * 0.25 + b.y * 0.75)),
+  );
+  await waitFor('line tap to insert a via', hierarchy, (window) => stopCount(window) === 3);
+  await tapAfterScroll('route-undo', 'route-scroll', 'down');
+  await waitFor('insert undo to restore two stops', hierarchy, (window) => stopCount(window) === 2);
+
+  await tap('route-map-point-0');
+  await tap('route-point-straight');
+  await waitForId('route-navigate', false);
+  await tapAfterScroll('route-undo', 'route-scroll', 'down');
+  await waitForId('route-navigate');
+
+  // A native annotation drag should change a route request, not merely pan
+  // the camera. Read the fixture's requests instead of guessing from pixels.
+  const baselineResponse = await fetch(`${FIXTURE_HOST}/api/e2e/route-queries`);
+  if (!baselineResponse.ok) throw new Error('Could not read route query fixture');
+  const baselineQueries = await baselineResponse.json();
+  const original = baselineQueries.filter((query) => query.locations?.length === 2).at(-1)
+    ?.locations?.[0];
+  if (!original) throw new Error('No original route point in fixture requests');
+  const response = await fetch(`${FIXTURE_HOST}/api/e2e/route-queries?clear=1`);
+  if (!response.ok) throw new Error('Could not clear route query fixture');
+  const marker = visibleNode(hierarchy(), 'route-map-point-0')?.bounds;
+  if (!marker) throw new Error('Map point vanished before drag');
+  const start = center(marker);
+  shell(
+    'input',
+    'swipe',
+    String(Math.round(start.x)),
+    String(Math.round(start.y)),
+    String(Math.round(start.x + 55)),
+    String(Math.round(start.y - 35)),
+    '900',
+  );
+  await waitFor(
+    'drag to reroute through its new position',
+    async () => {
+      const res = await fetch(`${FIXTURE_HOST}/api/e2e/route-queries`);
+      return res.json();
+    },
+    (queries) =>
+      queries.some((query) => {
+        const moved = query.locations?.[0];
+        return (
+          moved &&
+          (Math.abs(moved.lat - original.lat) > 0.00001 ||
+            Math.abs(moved.lon - original.lon) > 0.00001)
+        );
+      }),
+    30_000,
+  );
+  await tapAfterScroll('route-undo', 'route-scroll', 'down');
+
+  await tap('route-map-point-1');
+  await tap('route-point-remove');
+  await waitFor('point menu to remove a stop', hierarchy, (window) => stopCount(window) === 1);
+  await tapAfterScroll('route-undo', 'route-scroll', 'down');
+  await waitFor('remove undo to restore two stops', hierarchy, (window) => stopCount(window) === 2);
+}
+
 async function planRoadRoute(folderId, placeId) {
   await openRouteFromSavedPlace(placeId);
+  await editRouteOnMap();
   // This route-only control is the first stable signal that the detailed road
   // result has landed; the alternatives are asserted later in the navigation
   // preview, where both choices are shown. It needs a computed path to exist,

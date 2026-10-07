@@ -20,6 +20,7 @@ import {
   folderHasPinLabels,
   tagHasPinLabels,
   trackSummary,
+  visibleOnMap,
   type CollectionRevealTarget,
 } from '@atlas/core';
 import type { ImportSummary, PlaceRecord, TrackRecord } from '@atlas/storage';
@@ -36,6 +37,8 @@ interface SidebarProps {
   data: UserData;
   garmin: GarminState;
   onRevealGarminItem: (target: CollectionRevealTarget) => void;
+  /** Open a Garmin course in the planner to reshape and replace it. */
+  onEditGarminCourse: (id: string) => void;
   /** Which folders and tags draw their pins' names on the map. */
   pinLabels: PinLabelsController;
   selectedTrackId: string | null;
@@ -185,6 +188,7 @@ export function Sidebar({
   data,
   garmin,
   onRevealGarminItem,
+  onEditGarminCourse,
   pinLabels,
   selectedTrackId,
   placeCommutes = new Map(),
@@ -228,7 +232,7 @@ export function Sidebar({
   // leading `#` meaning tags alone. Session-only, like the expansion state: a
   // filter is a way of looking at the list, not a property of it.
   const [filter, setFilter] = useState('');
-  const [view, setView] = useState<LibraryView | 'garmin'>('folders');
+  const [view, setView] = useState<LibraryView>('folders');
   const [sport, setSport] = useState<string | null>(null);
   const [year, setYear] = useState<number | null>(null);
   const { drag, dropClass, dragProps, dropOnPlace, dropOnFolder } = useSidebarDnd(data);
@@ -249,11 +253,12 @@ export function Sidebar({
       libraryTracks(filtered.tracks, view === 'activities' ? 'activities' : 'courses', sport, year),
     [filtered.tracks, view, sport, year],
   );
-  const garminActivities = useMemo(
-    () => libraryTracks(filtered.tracks, 'activities', null, null),
-    [filtered.tracks],
-  );
   const sports = useMemo(() => librarySports(viewSource), [viewSource]);
+  // A listed track the map does not draw, by its own eye or a hidden folder above it.
+  const listedHidden = useMemo(() => {
+    const drawn = new Set(visibleOnMap(data.tracks, data.collections).map((track) => track.id));
+    return viewTracks.some((track) => !drawn.has(track.id));
+  }, [viewTracks, data.tracks, data.collections]);
   const years = useMemo(() => activityYears(viewSource), [viewSource]);
   // The whole vocabulary, not the filtered one: a filter narrows what is on
   // screen, never which tags an editor may offer.
@@ -803,14 +808,17 @@ export function Sidebar({
           >
             Export all
           </button>
-          <button
-            type="button"
-            onClick={() => void data.setAllVisible(anyHidden)}
-            disabled={data.status !== 'ready' || !hasItems}
-            title={anyHidden ? 'Show everything on the map' : 'Hide everything from the map'}
-          >
-            {anyHidden ? 'Show all' : 'Hide all'}
-          </button>
+          {/* Routes & courses and Activities have their own, for what they list. */}
+          {view !== 'courses' && view !== 'activities' && (
+            <button
+              type="button"
+              onClick={() => void data.setAllVisible(anyHidden)}
+              disabled={data.status !== 'ready' || !hasItems}
+              title={anyHidden ? 'Show everything on the map' : 'Hide everything from the map'}
+            >
+              {anyHidden ? 'Show all' : 'Hide all'}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => startCreating(null)}
@@ -863,15 +871,7 @@ export function Sidebar({
           )}
         </div>
         <div className="library-tabs" role="tablist" aria-label="Collections view">
-          {(
-            [
-              'folders',
-              'places',
-              'courses',
-              'activities',
-              ...(garmin.connected ? (['garmin'] as const) : []),
-            ] as const
-          ).map((item) => (
+          {(['folders', 'places', 'courses', 'activities'] as const).map((item) => (
             <button
               key={item}
               type="button"
@@ -890,7 +890,6 @@ export function Sidebar({
                   places: 'Places',
                   courses: 'Routes & courses',
                   activities: 'Activities',
-                  garmin: 'Garmin',
                 }[item]
               }
             </button>
@@ -932,13 +931,31 @@ export function Sidebar({
                 </select>
               </label>
             )}
-            <button
-              type="button"
-              disabled={viewTracks.length === 0}
-              onClick={() => void data.showOnlyTracks(viewTracks.map((track) => track.id))}
-            >
-              Show matching tracks only on map
-            </button>
+            <div className="library-visibility" role="group" aria-label="Tracks on map">
+              <button
+                type="button"
+                disabled={viewTracks.length === 0}
+                title={
+                  listedHidden ? 'Show every listed track on the map' : 'Hide every listed track'
+                }
+                onClick={() =>
+                  void data.setTracksVisible(
+                    viewTracks.map((track) => track.id),
+                    listedHidden,
+                  )
+                }
+              >
+                {listedHidden ? 'Show all' : 'Hide all'}
+              </button>
+              <button
+                type="button"
+                disabled={viewTracks.length === 0}
+                title="Show the listed tracks and hide every other track"
+                onClick={() => void data.showOnlyTracks(viewTracks.map((track) => track.id))}
+              >
+                Show only these
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -1059,80 +1076,6 @@ export function Sidebar({
         {data.status === 'ready' &&
           (view === 'folders' ? (
             branch(null, 0)
-          ) : view === 'garmin' ? (
-            <div className="garmin-library">
-              <GarminCourses garmin={garmin} onReveal={onRevealGarminItem} />
-              <div className="garmin-courses-head">
-                <h4>Imported activities · {garminActivities.length}</h4>
-                <button
-                  type="button"
-                  disabled={garmin.busy}
-                  onClick={() => void garmin.importActivities()}
-                >
-                  {garmin.busy
-                    ? 'Working…'
-                    : garmin.nextActivityOffset > 0
-                      ? 'Import older'
-                      : 'Import recent'}
-                </button>
-                {garmin.nextActivityOffset > 0 && (
-                  <button
-                    type="button"
-                    disabled={garmin.busy}
-                    onClick={() => void garmin.restartActivityImport()}
-                  >
-                    Check newest
-                  </button>
-                )}
-              </div>
-              <ul className="item-list">{garminActivities.map(trackRow)}</ul>
-              {garminActivities.length === 0 && (
-                <p className="sidebar-empty">No imported activities match this filter.</p>
-              )}
-              <h4>Saved locations</h4>
-              <p className="settings-note">
-                Export waypoints as GPX from Garmin Explore, then import the file here. Garmin
-                Connect does not provide these watch locations through this connection.
-              </p>
-              <input
-                ref={garminLocationInputRef}
-                type="file"
-                accept=".gpx,.kml,.kmz"
-                hidden
-                onChange={(event) => {
-                  const folder = data.collections.find(
-                    (item) => item.name === 'Garmin locations' && item.parentId === null,
-                  );
-                  void onImportFiles(
-                    event.target.files,
-                    folder
-                      ? { collectionId: folder.id }
-                      : { newCollection: { name: 'Garmin locations' } },
-                  );
-                }}
-              />
-              <button
-                type="button"
-                disabled={importing}
-                onClick={() => garminLocationInputRef.current?.click()}
-              >
-                Import saved locations
-              </button>
-              <ul className="item-list">
-                {filtered.places
-                  .filter((place) =>
-                    data.collections.some(
-                      (item) => item.id === place.collectionId && item.name === 'Garmin locations',
-                    ),
-                  )
-                  .map(placeRow)}
-              </ul>
-              {garmin.error && (
-                <p className="settings-note settings-error" role="alert">
-                  {garmin.error}
-                </p>
-              )}
-            </div>
           ) : (
             <>
               {view === 'places' && (
@@ -1140,10 +1083,30 @@ export function Sidebar({
                   Atlas saved places. Garmin saved locations are not imported.
                 </p>
               )}
-              {view === 'courses' && (
-                <p className="settings-note">
-                  Atlas routes and saved Garmin course copies. Garmin-only courses are in Garmin.
-                </p>
+              {view === 'activities' && garmin.connected && (
+                <div className="garmin-courses-head">
+                  <h4>From Garmin Connect</h4>
+                  <button
+                    type="button"
+                    disabled={garmin.busy}
+                    onClick={() => void garmin.importActivities()}
+                  >
+                    {garmin.busy
+                      ? 'Working…'
+                      : garmin.nextActivityOffset > 0
+                        ? 'Import older'
+                        : 'Import recent'}
+                  </button>
+                  {garmin.nextActivityOffset > 0 && (
+                    <button
+                      type="button"
+                      disabled={garmin.busy}
+                      onClick={() => void garmin.restartActivityImport()}
+                    >
+                      Check newest
+                    </button>
+                  )}
+                </div>
               )}
               <ul className="item-list">
                 {view === 'places' ? filtered.places.map(placeRow) : viewTracks.map(trackRow)}
@@ -1157,6 +1120,53 @@ export function Sidebar({
                       ? 'routes or courses'
                       : 'activities'}{' '}
                   match these filters.
+                </p>
+              )}
+              {view === 'courses' && garmin.connected && (
+                <div className="garmin-library">
+                  <GarminCourses
+                    garmin={garmin}
+                    onReveal={onRevealGarminItem}
+                    onEditRoute={onEditGarminCourse}
+                  />
+                </div>
+              )}
+              {view === 'places' && garmin.connected && (
+                <div className="garmin-library">
+                  <h4>Garmin saved locations</h4>
+                  <p className="settings-note">
+                    Export waypoints as GPX from Garmin Explore, then import the file here. Garmin
+                    Connect does not provide these watch locations through this connection.
+                  </p>
+                  <input
+                    ref={garminLocationInputRef}
+                    type="file"
+                    accept=".gpx,.kml,.kmz"
+                    hidden
+                    onChange={(event) => {
+                      const folder = data.collections.find(
+                        (item) => item.name === 'Garmin locations' && item.parentId === null,
+                      );
+                      void onImportFiles(
+                        event.target.files,
+                        folder
+                          ? { collectionId: folder.id }
+                          : { newCollection: { name: 'Garmin locations' } },
+                      );
+                    }}
+                  />
+                  <button
+                    type="button"
+                    disabled={importing}
+                    onClick={() => garminLocationInputRef.current?.click()}
+                  >
+                    Import saved locations
+                  </button>
+                </div>
+              )}
+              {(view === 'courses' || view === 'activities') && garmin.error && (
+                <p className="settings-note settings-error" role="alert">
+                  {garmin.error}
                 </p>
               )}
             </>

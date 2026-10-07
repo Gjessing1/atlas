@@ -80,6 +80,8 @@ interface AppSheetsProps {
   onShowTrack: (track: TrackRecord) => void;
   /** Convert a stored/imported track to an editable snapped route. */
   onPlanTrack: (track: TrackRecord) => void;
+  /** Open a Garmin course in the planner to reshape and replace it. */
+  onEditGarminCourse: (id: string) => void;
   onImportTracks: (options?: ImportOptions) => Promise<ImportResult | null>;
   /** Resolve an iNatur permit link/id and import its boundary as a track. */
   onImportInatur: (input: string, options?: ImportOptions) => Promise<ImportResult | null>;
@@ -130,6 +132,7 @@ export function AppSheets({
   onPickDestination,
   onShowTrack,
   onPlanTrack,
+  onEditGarminCourse,
   onImportTracks,
   onImportInatur,
 }: AppSheetsProps) {
@@ -143,6 +146,10 @@ export function AppSheets({
         onShowGarminTrack={(id) => {
           onCloseFavorites();
           onShowSavedTrack(id);
+        }}
+        onEditGarminCourse={(id) => {
+          onCloseFavorites();
+          onEditGarminCourse(id);
         }}
         revealItem={revealCollectionItem}
         onRevealed={onRevealedCollectionItem}
@@ -186,6 +193,7 @@ export function AppSheets({
         onDeleteFolder={(id) => void data.deleteCollection(id)}
         onSetAllVisible={(v) => void data.setAllVisible(v)}
         onShowOnlyTracks={(ids) => void data.showOnlyTracks(ids)}
+        onSetTracksVisible={(ids, visible) => void data.setTracksVisible(ids, visible)}
         onExportAll={() => void data.exportAll()}
         onImport={onImportTracks}
         onImportInatur={onImportInatur}

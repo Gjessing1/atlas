@@ -278,6 +278,11 @@ export interface UserData<TFile> extends StorageAvailability {
   setAllVisible: (visible: boolean) => Promise<void>;
   /** Keep only selected tracks drawn; places are unaffected. */
   showOnlyTracks: (ids: readonly string[]) => Promise<void>;
+  /**
+   * Show or hide just these tracks, leaving every other one as it is. Showing also opens the
+   * folders above them, since a track in a hidden folder is not drawn.
+   */
+  setTracksVisible: (ids: readonly string[], visible: boolean) => Promise<void>;
 
   /** Everything exportable (rule 5): zip when the platform can, else JSON. */
   exportAll: () => Promise<void>;
@@ -928,8 +933,8 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
     [refreshPlaces, refreshTracks, refreshCollections, reportWriteFailure],
   );
 
-  const showOnlyTracks = useCallback(
-    async (ids: readonly string[]) => {
+  const changeTrackVisibility = useCallback(
+    async (ids: readonly string[], others: 'hide' | 'keep', visible = true) => {
       const s = storageRef.current;
       if (!s) return;
       try {
@@ -938,17 +943,22 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
         const byId = new Map(folders.map((folder) => [folder.id, folder]));
         const parents = new Set<string>();
         for (const track of tracks) {
-          if (!wanted.has(track.id)) continue;
+          if (!visible || !wanted.has(track.id)) continue;
           let id = track.collectionId;
           while (id && !parents.has(id)) {
             parents.add(id);
             id = byId.get(id)?.parentId ?? null;
           }
         }
+        const target = (id: string): boolean | null =>
+          wanted.has(id) ? visible : others === 'hide' ? false : null;
         await Promise.all([
           ...tracks
-            .filter((track) => track.visible !== wanted.has(track.id))
-            .map((track) => s.updateTrack(track.id, { visible: wanted.has(track.id) })),
+            .filter((track) => {
+              const next = target(track.id);
+              return next !== null && track.visible !== next;
+            })
+            .map((track) => s.updateTrack(track.id, { visible: target(track.id)! })),
           ...folders
             .filter((folder) => parents.has(folder.id) && !folder.visible)
             .map((folder) => s.setCollectionVisible(folder.id, true)),
@@ -959,6 +969,14 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
       }
     },
     [refreshTracks, refreshCollections, reportWriteFailure],
+  );
+  const showOnlyTracks = useCallback(
+    (ids: readonly string[]) => changeTrackVisibility(ids, 'hide'),
+    [changeTrackVisibility],
+  );
+  const setTracksVisible = useCallback(
+    (ids: readonly string[], visible: boolean) => changeTrackVisibility(ids, 'keep', visible),
+    [changeTrackVisibility],
   );
 
   const exportAll = useCallback(async () => {
@@ -1060,6 +1078,7 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
     deleteCollection,
     setAllVisible,
     showOnlyTracks,
+    setTracksVisible,
     exportAll,
     getSetting,
     setSetting,

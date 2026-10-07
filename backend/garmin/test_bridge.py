@@ -173,6 +173,32 @@ class CourseActionTest(unittest.TestCase):
         self.assertEqual((message["metaDataId"], message["deviceId"], message["messageName"]),
                          (7, 123, "18k"))
 
+    def test_a_replacement_upload_keeps_the_replaced_courses_sport(self):
+        client = Mock()
+        points = [{"latitude": 59.9, "longitude": 10.7, "elevation": 1},
+                  {"latitude": 59.91, "longitude": 10.71, "elevation": 2}]
+
+        def post(_service, path, **_kwargs):
+            return {"geoPoints": points} if path.endswith("/import") else {"courseId": 99}
+        client.client.post.side_effect = post
+
+        def get(path):
+            # The replaced course is ice skating, which no routing profile maps to.
+            return {"activityTypePk": 168} if path.endswith("/7") else {"courseName": "Lake"}
+        client.connectapi.side_effect = get
+        reply = self.call(client, {"action": "uploadCourse", "name": "Lake", "profile": "hike",
+                                   "gpx": "<gpx/>", "sportOf": "7"})
+        self.assertEqual(reply["id"], 99)
+        created = client.client.post.call_args_list[1].kwargs["json"]
+        self.assertEqual(created["activityTypePk"], 168)
+
+    def test_a_replacement_refuses_a_bad_source_course(self):
+        client = Mock()
+        client.client.post.return_value = {"geoPoints": []}
+        reply = self.call(client, {"action": "uploadCourse", "name": "Lake", "profile": "hike",
+                                   "gpx": "<gpx/>", "sportOf": "7/../x"})
+        self.assertEqual(reply, {"error": "Invalid Garmin course"})
+
 
 if __name__ == "__main__":
     unittest.main()

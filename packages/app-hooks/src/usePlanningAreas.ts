@@ -10,6 +10,7 @@
 import type { LngLatBbox } from '@atlas/core';
 import type { TrackData } from '@atlas/gpx';
 import type { TrackRecord } from '@atlas/storage';
+import { isAreaTrack } from './libraryViews.js';
 import { useEffect, useState } from 'react';
 
 export interface PlanningArea {
@@ -49,10 +50,7 @@ export function planningArea(track: TrackRecord, data: TrackData | null): Planni
       polygons: track.area.polygons,
     };
   }
-  const inatur =
-    track.tags.some((tag) => tag.toLowerCase() === 'inatur permit') ||
-    track.name.toLowerCase().startsWith('inatur');
-  if (!inatur || !data) return null;
+  if (!isAreaTrack(track) || !data) return null;
 
   // iNatur GPX export stores one closed segment per boundary ring. Without the
   // original topology we cannot recover holes reliably, so each closed ring is

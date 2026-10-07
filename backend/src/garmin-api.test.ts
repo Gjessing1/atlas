@@ -140,7 +140,33 @@ it('validates course input and returns the verified Garmin course', async () => 
     'run',
     '<gpx><trk><trkseg><trkpt lat="1" lon="2"/><trkpt lat="3" lon="4"/></trkseg></trk></gpx>',
     '456',
+    undefined,
   ]);
+  const replacement = await app.inject({
+    method: 'POST',
+    url: '/api/garmin/course',
+    headers,
+    payload: {
+      name: 'Sunday run',
+      profile: 'hike',
+      gpx: '<gpx><trk><trkseg><trkpt lat="1" lon="2"/><trkpt lat="3" lon="4"/></trkseg></trk></gpx>',
+      sportOf: '7',
+    },
+  });
+  expect(replacement.statusCode).toBe(200);
+  expect(vi.mocked(garmin.uploadCourse).mock.calls.at(-1)?.slice(4)).toEqual([undefined, '7']);
+  const badSource = await app.inject({
+    method: 'POST',
+    url: '/api/garmin/course',
+    headers,
+    payload: {
+      name: 'Sunday run',
+      profile: 'hike',
+      gpx: '<gpx><trk><trkseg><trkpt lat="1" lon="2"/><trkpt lat="3" lon="4"/></trkseg></trk></gpx>',
+      sportOf: '../7',
+    },
+  });
+  expect(badSource.statusCode).toBe(400);
 });
 
 it('serves activity metadata and GPX only to an authenticated user', async () => {

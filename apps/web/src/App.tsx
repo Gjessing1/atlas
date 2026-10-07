@@ -78,7 +78,12 @@ import {
 import { fetchTransitCommute, fetchTransitCommuteSegments, type TransitTrip } from '@atlas/transit';
 import { spotPlaceDraft, type PotentialSpot } from '@atlas/potential';
 import { trackBounds, type TrackData } from '@atlas/gpx';
-import { isRoutingProfile, routePathToTrackData, trackToRoutePoints } from '@atlas/routing';
+import {
+  isRoutingProfile,
+  routePathToTrackData,
+  trackToRoutePoints,
+  type RoutingProfile,
+} from '@atlas/routing';
 import { trainOf, type SatelliteOmm } from '@atlas/satellites';
 import type { PlaceRecord, TrackRecord } from '@atlas/storage';
 import maplibregl from 'maplibre-gl';
@@ -153,7 +158,7 @@ import { SearchBox } from './SearchBox.js';
 import { StorageBanner } from './storage/StorageBanner.js';
 import { type ImportOptions, type ImportResult, useUserData } from './storage/useUserData.js';
 import { useSync } from './sync/useSync.js';
-import { useGarmin } from '@atlas/app-hooks';
+import { garminCourseProfile, useGarmin } from '@atlas/app-hooks';
 import { useWeather } from './weather/useWeather.js';
 import { useWeatherTarget } from './weather/useWeatherTarget.js';
 
@@ -1091,29 +1096,49 @@ export function App() {
     [userData],
   );
 
-  const planTrack = useCallback(
-    (track: TrackRecord) => {
-      void getTrackData(track.id).then((data) => {
-        if (!data) return;
-        const points = trackToRoutePoints(data);
-        if (points.length < 2) return;
-        closePanels();
-        setSelectedTrack(null);
-        route.restore({
-          profile: route.profile,
-          waypoints: points.map((pos, index) => ({
-            pos,
-            ...(index === 0
-              ? { name: `${track.name} start` }
-              : index === points.length - 1
-                ? { name: `${track.name} finish` }
-                : {}),
-          })),
-        });
+  const planTrackId = useCallback(
+    async (trackId: string, name: string, profile: RoutingProfile) => {
+      const data = await getTrackData(trackId);
+      if (!data) return;
+      const points = trackToRoutePoints(data);
+      if (points.length < 2) return;
+      closePanels();
+      setSelectedTrack(null);
+      route.restore({
+        profile,
+        waypoints: points.map((pos, index) => ({
+          pos,
+          ...(index === 0
+            ? { name: `${name} start` }
+            : index === points.length - 1
+              ? { name: `${name} finish` }
+              : {}),
+        })),
       });
     },
     [closePanels, getTrackData, route],
   );
+  const planTrack = useCallback(
+    (track: TrackRecord) => void planTrackId(track.id, track.name, route.profile),
+    [planTrackId, route.profile],
+  );
+
+  // A Garmin course reshaped in the planner is replaced on Garmin from the route panel.
+  const { startCourseEdit, cancelCourseEdit } = garmin;
+  const editGarminCourse = useCallback(
+    async (id: string) => {
+      const edit = await startCourseEdit(id);
+      if (edit) await planTrackId(edit.trackId, edit.name, garminCourseProfile(edit.type));
+    },
+    [startCourseEdit, planTrackId],
+  );
+  // Closing the planner ends the edit; the transition, not the state, so the edit that is
+  // just being opened (planner still closed) survives.
+  const plannerWasActive = useRef(route.active);
+  useEffect(() => {
+    if (plannerWasActive.current && !route.active) cancelCourseEdit();
+    plannerWasActive.current = route.active;
+  }, [route.active, cancelCourseEdit]);
 
   const onImported = useCallback(
     (result: ImportResult) => {
@@ -1736,6 +1761,7 @@ export function App() {
           <Sidebar
             data={userData}
             garmin={garmin}
+            onEditGarminCourse={(id) => void editGarminCourse(id)}
             onRevealGarminItem={(target) => {
               setRevealItem(target);
               if (target.kind === 'track') setShowTrackId(target.id);

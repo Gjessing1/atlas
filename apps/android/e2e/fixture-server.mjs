@@ -30,6 +30,7 @@ const COMMUTE_STOPS = [
   { match: 'asker', name: 'Asker E2E', position: INTERCHANGE, stopId: 'NSR:StopPlace:59873' },
   { match: 'oslo', name: 'Oslo E2E', position: DESTINATION, stopId: 'NSR:StopPlace:58404' },
 ];
+const routeQueries = [];
 
 const json = (response, body, status = 200) => {
   response.writeHead(status, {
@@ -349,6 +350,11 @@ const server = createServer(async (request, response) => {
       response.setHeader('connection', 'close');
       return json(response, lastWidgetBoard(url.searchParams.get('variant') ?? 'v2'));
     }
+    if (url.pathname === '/api/e2e/route-queries') {
+      response.setHeader('connection', 'close');
+      if (url.searchParams.has('clear')) routeQueries.length = 0;
+      return json(response, routeQueries);
+    }
     if (url.pathname === '/api/transit/stop-lines') {
       return json(response, {
         stop: { id: url.searchParams.get('stopId') ?? '', name: 'E2E stop' },
@@ -360,6 +366,8 @@ const server = createServer(async (request, response) => {
     }
     if (url.pathname === '/api/route' && request.method === 'POST') {
       const body = await readJson(request);
+      routeQueries.push(body);
+      if (routeQueries.length > 100) routeQueries.shift();
       const locations = Array.isArray(body.locations) ? body.locations : [];
       const points = locations.flatMap((point) =>
         typeof point?.lat === 'number' && typeof point?.lon === 'number'

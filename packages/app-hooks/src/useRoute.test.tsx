@@ -267,6 +267,31 @@ describe('useRoute', () => {
     expect(result.current.waypoints.find((w) => w.id === wa!.id)).toBeUndefined();
   });
 
+  it('undoes a whole drag, restores removed points, and keeps direct legs in a saved plan', () => {
+    const route = vi.fn<RouteFn>((q) => Promise.resolve(pathFor(q)));
+    const { result } = renderHook(() => useRoute(route));
+    act(() => result.current.start(A));
+    act(() => result.current.addWaypoint(B));
+    const id = result.current.waypoints[0]!.id;
+    act(() => result.current.setLegStraight(id, true));
+    expect(result.current.plan?.waypoints[0]?.straightAfter).toBe(true);
+    act(() => result.current.previewWaypointMove(id, C));
+    act(() => result.current.previewWaypointMove(id, B));
+    act(() => result.current.finishWaypointMove(id, C));
+    expect(result.current.waypoints[0]?.pos).toEqual(C);
+    act(() => result.current.undo());
+    expect(result.current.waypoints[0]?.pos).toEqual(A);
+    expect(result.current.waypoints[0]?.straightAfter).toBe(true);
+    act(() => result.current.redo());
+    expect(result.current.waypoints[0]?.pos).toEqual(C);
+    act(() => result.current.removeWaypoint(id));
+    expect(result.current.waypoints).toHaveLength(1);
+    act(() => result.current.undo());
+    expect(result.current.waypoints[0]?.id).toBe(id);
+    act(() => result.current.clear());
+    expect(result.current.canUndo).toBe(false);
+  });
+
   it('labels stops, and refuses labels that no longer describe the stop', async () => {
     const route = vi.fn<RouteFn>((q) => Promise.resolve(pathFor(q)));
     const { result } = renderHook(() => useRoute(route));

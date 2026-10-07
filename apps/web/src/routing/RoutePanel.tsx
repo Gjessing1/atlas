@@ -48,6 +48,7 @@ import {
   SlidersIcon,
   TrainIcon,
 } from '../icons.js';
+import { GarminCourseEditBar, GarminReplaceConfirm } from '../settings/GarminCourseEdit.js';
 import { TransitResults } from './TransitResults.js';
 import { useGeocode } from './useGeocode.js';
 import type { RoutePlanner } from './useRoute.js';
@@ -288,6 +289,8 @@ export function RoutePanel({
   const [garminDevice, setGarminDevice] = useState('');
   // Waypoint id whose search box is open for re-pointing, or null.
   const [editing, setEditing] = useState<number | null>(null);
+  const [pointActionsId, setPointActionsId] = useState<number | null>(null);
+  const [pointName, setPointName] = useState('');
   const [locating, setLocating] = useState(false);
   const [locateFailed, setLocateFailed] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
@@ -611,6 +614,32 @@ export function RoutePanel({
           </div>
         )}
 
+        {!transitMode && (
+          <>
+            <GarminCourseEditBar garmin={garmin} path={path ?? null} profile={route.profile} />
+            <GarminReplaceConfirm garmin={garmin} />
+          </>
+        )}
+
+        <div className="route-edit-history" role="group" aria-label="Point edits">
+          <button
+            type="button"
+            onClick={route.undo}
+            disabled={!route.canUndo}
+            aria-label="Undo point edit"
+          >
+            Undo
+          </button>
+          <button
+            type="button"
+            onClick={route.redo}
+            disabled={!route.canRedo}
+            aria-label="Redo point edit"
+          >
+            Redo
+          </button>
+        </div>
+
         {route.waypoints.length > 0 ? (
           <ol className="route-waypoints">
             {route.waypoints.map((w, i) => {
@@ -634,6 +663,9 @@ export function RoutePanel({
                   <span className="route-wp-handle" aria-hidden="true">
                     ⠿
                   </span>
+                  {!route.roundTrip && w.straightAfter && (
+                    <span className="route-leg-tag">Direct →</span>
+                  )}
                   <span
                     className={role ? 'route-wp-role' : 'route-wp-label'}
                     aria-hidden={role ? undefined : 'true'}
@@ -671,6 +703,18 @@ export function RoutePanel({
                       >
                         {stopTitle(w)}
                       </button>
+                      <button
+                        type="button"
+                        className="icon-button"
+                        aria-label={`Point ${i + 1} actions`}
+                        aria-expanded={pointActionsId === w.id}
+                        onClick={() => {
+                          setPointActionsId(pointActionsId === w.id ? null : w.id);
+                          setPointName(w.name ?? '');
+                        }}
+                      >
+                        ⋯
+                      </button>
                       {(route.roundTrip || (i > 0 && i < route.waypoints.length - 1)) && (
                         <button
                           type="button"
@@ -693,6 +737,92 @@ export function RoutePanel({
               ? 'Click the map to set the starting point.'
               : 'Click the map to add start and destination.'}
           </p>
+        )}
+        {pointActionsId !== null &&
+          (() => {
+            const index = route.waypoints.findIndex((w) => w.id === pointActionsId);
+            if (index < 0) return null;
+            const point = route.waypoints[index]!;
+            const close = () => setPointActionsId(null);
+            return (
+              <div
+                className="route-list-point-actions"
+                role="group"
+                aria-label={`Point ${index + 1} actions`}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    route.removeWaypoint(point.id);
+                    close();
+                  }}
+                >
+                  Remove
+                </button>
+                {index > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      route.makeStart(point.id);
+                      close();
+                    }}
+                  >
+                    Make start
+                  </button>
+                )}
+                {index < route.waypoints.length - 1 && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        route.makeFinish(point.id);
+                        close();
+                      }}
+                    >
+                      Make finish
+                    </button>
+                    {!route.roundTrip && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          route.setLegStraight(point.id, !point.straightAfter);
+                          close();
+                        }}
+                      >
+                        {point.straightAfter ? 'Follow paths to next' : 'Straight line to next'}
+                      </button>
+                    )}
+                  </>
+                )}
+                <input
+                  aria-label="Point name"
+                  placeholder="Name it"
+                  value={pointName}
+                  onChange={(event) => setPointName(event.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    route.renameWaypoint(point.id, pointName);
+                    close();
+                  }}
+                >
+                  Save name
+                </button>
+              </div>
+            );
+          })()}
+        {route.waypoints.some((w) => route.offPathM[w.id]) && (
+          <div className="route-leg-warnings" role="status">
+            {route.waypoints.map((w, i) =>
+              route.offPathM[w.id] ? (
+                <p key={w.id}>
+                  Point {i + 1} is {route.offPathM[w.id]} m from the routed path. The line uses the
+                  nearest mapped way.
+                </p>
+              ) : null,
+            )}
+          </div>
         )}
 
         {/* The always-empty next stop, sitting at the end of the list where the
@@ -1115,6 +1245,12 @@ export function RoutePanel({
             type="button"
             className="route-navigate route-navigate-sticky"
             aria-label="Start navigation"
+            disabled={!route.roundTrip && route.waypoints.some((w) => w.straightAfter)}
+            title={
+              !route.roundTrip && route.waypoints.some((w) => w.straightAfter)
+                ? 'Guidance follows mapped paths. Save or export this direct-line plan as a track.'
+                : undefined
+            }
             onClick={() =>
               onNavigate(
                 destination,
@@ -1124,6 +1260,12 @@ export function RoutePanel({
           >
             Start
           </button>
+        )}
+        {!transitMode && !route.roundTrip && route.waypoints.some((w) => w.straightAfter) && (
+          <p className="route-hint">
+            Direct legs are included in the distance, elevation profile and GPX. Turn them back to
+            Follow paths for guided navigation.
+          </p>
         )}
       </div>
     </div>

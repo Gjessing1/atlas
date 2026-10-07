@@ -7,12 +7,16 @@ export {
 } from './useSync.js';
 export {
   garminCourseLine,
+  garminCourseProfile,
   garminCourseSports,
   garminDeliveryLine,
+  garminResendDevice,
   useGarmin,
   type GarminAutoImport,
   type GarminCourse,
+  type GarminCourseEdit,
   type GarminDelivery,
+  type GarminReplacement,
   type GarminState,
 } from './useGarmin.js';
 export {
@@ -23,6 +27,7 @@ export {
   librarySportCounts,
   librarySports,
   libraryTrackKind,
+  isAreaTrack,
   libraryTrackLine,
   libraryTrackSport,
   libraryTrackTags,

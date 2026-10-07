@@ -44,6 +44,7 @@ export const ROUTE_PLAN_SETTING = jsonSetting<StoredRoutePlan | null>({
           ...(typeof wp['transitStopId'] === 'string'
             ? { transitStopId: wp['transitStopId'] }
             : {}),
+          ...(wp['straightAfter'] === true ? { straightAfter: true } : {}),
         },
       ];
     });
@@ -78,7 +79,10 @@ export function planFromHash(hashPlan: RoutePlanState): StoredRoutePlan | null {
   if (!isRoutingProfile(hashPlan.profile) || hashPlan.points.length === 0) return null;
   const plan: StoredRoutePlan = {
     profile: hashPlan.profile,
-    waypoints: hashPlan.points.map((pos: LatLng) => ({ pos })),
+    waypoints: hashPlan.points.map((pos: LatLng, index) => ({
+      pos,
+      ...(hashPlan.directLegs?.includes(index) ? { straightAfter: true } : {}),
+    })),
   };
   if (hashPlan.roundTripKm !== undefined) plan.roundTripKm = hashPlan.roundTripKm;
   if (hashPlan.roundTripDirection !== undefined) {
@@ -113,6 +117,7 @@ export function useRoutePlanPersistence(
   fromLink: StoredRoutePlan | null | undefined,
 ): void {
   const { status, getSetting, setSetting } = settings;
+  const { dragging } = route;
   const { restore, plan } = route;
   // Until the saved plan has been read, saving would write the empty startup
   // plan over it.
@@ -151,8 +156,8 @@ export function useRoutePlanPersistence(
   }, [status, getSetting, restore, fromLink]);
 
   useEffect(() => {
-    if (!restoredRef.current || status !== 'ready') return;
+    if (!restoredRef.current || status !== 'ready' || dragging) return;
     // Closing route mode clears the plan, and '' reads back as "nothing saved".
     void setSetting(ROUTE_PLAN_SETTING.key, plan ? ROUTE_PLAN_SETTING.encode(plan) : '');
-  }, [plan, status, setSetting]);
+  }, [plan, status, setSetting, dragging]);
 }

@@ -14,14 +14,14 @@ export type { RoutePlanner, RouteWaypoint } from '@atlas/app-hooks';
  */
 export function useRoute(vehicle?: VehicleProfile | null): RoutePlanner {
   const baseUrl = useServerOrigin();
+  const elevation = useMemo(() => httpElevationProfile({ baseUrl }), [baseUrl]);
   const route = useMemo<RouteFn>(() => {
     const provider = makeRouteProvider(baseUrl);
     const trace = makeTraceTransport(baseUrl);
-    const elevation = httpElevationProfile({ baseUrl });
     return async (query, signal) => {
       const result = await provider.route(query, signal);
       return query.details ? enrichPlannedResult(result, query, trace, elevation, signal) : result;
     };
-  }, [baseUrl]);
-  return useSharedRoute(route, vehicle);
+  }, [baseUrl, elevation]);
+  return useSharedRoute(route, vehicle, elevation);
 }

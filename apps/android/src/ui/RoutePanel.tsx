@@ -58,6 +58,7 @@ import { BottomSheet, type BottomSheetHandle } from './BottomSheet';
 import { ElevationChart } from './ElevationChart';
 import { flattenFolders } from './folders';
 import { ReorderableList } from './ReorderableList';
+import { GarminCourseEditBar, GarminReplaceConfirm } from './GarminCourseEdit';
 import { useGeocode } from './useGeocode';
 import {
   CarIcon,
@@ -378,6 +379,8 @@ export function RoutePanel({
   const folders = useMemo(() => flattenFolders(collections), [collections]);
   /** Waypoint id whose search box is open for re-pointing, or null. */
   const [editing, setEditing] = useState<number | null>(null);
+  const [pointActionsId, setPointActionsId] = useState<number | null>(null);
+  const [pointName, setPointName] = useState('');
   const [reorderingStops, setReorderingStops] = useState(false);
   // What the driving plan is actually being costed for. Read from the merged
   // preferences rather than the setting, so the chip can only ever say what was
@@ -787,6 +790,36 @@ export function RoutePanel({
           </Text>
         ) : null}
 
+        {!transitMode ? (
+          <>
+            <GarminCourseEditBar garmin={garmin} path={path} profile={route.profile} />
+            <GarminReplaceConfirm garmin={garmin} />
+          </>
+        ) : null}
+
+        <View style={styles.roundRow}>
+          <Pressable
+            style={[styles.button, styles.buttonQuiet]}
+            onPress={route.undo}
+            disabled={!route.canUndo}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !route.canUndo }}
+            testID="route-undo"
+          >
+            <Text style={styles.buttonQuietText}>Undo</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.button, styles.buttonQuiet]}
+            onPress={route.redo}
+            disabled={!route.canRedo}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !route.canRedo }}
+            testID="route-redo"
+          >
+            <Text style={styles.buttonQuietText}>Redo</Text>
+          </Pressable>
+        </View>
+
         {route.waypoints.length > 0 ? (
           <View style={styles.wpList}>
             <ReorderableList
@@ -848,6 +881,18 @@ export function RoutePanel({
                         </Text>
                       </Pressable>
                     )}
+                    <Pressable
+                      style={styles.iconButton}
+                      onPress={() => {
+                        setPointActionsId(pointActionsId === w.id ? null : w.id);
+                        setPointName(w.name ?? '');
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Point ${i + 1} actions`}
+                      testID={`route-wp-actions-${w.id}`}
+                    >
+                      <Text style={styles.iconText}>⋯</Text>
+                    </Pressable>
                     {editing === w.id ||
                     (!route.roundTrip && (i === 0 || i === route.waypoints.length - 1)) ? null : (
                       <Pressable
@@ -862,6 +907,94 @@ export function RoutePanel({
                 );
               }}
             />
+            {pointActionsId !== null &&
+              (() => {
+                const index = route.waypoints.findIndex((w) => w.id === pointActionsId);
+                if (index < 0) return null;
+                const point = route.waypoints[index]!;
+                const close = () => setPointActionsId(null);
+                return (
+                  <View style={styles.wpActionList}>
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => {
+                        route.removeWaypoint(point.id);
+                        close();
+                      }}
+                      testID="route-list-point-remove"
+                    >
+                      <Text style={styles.buttonQuietText}>Remove</Text>
+                    </Pressable>
+                    {index > 0 ? (
+                      <Pressable
+                        accessibilityRole="button"
+                        onPress={() => {
+                          route.makeStart(point.id);
+                          close();
+                        }}
+                        testID="route-list-point-start"
+                      >
+                        <Text style={styles.buttonQuietText}>Make start</Text>
+                      </Pressable>
+                    ) : null}
+                    {index < route.waypoints.length - 1 ? (
+                      <>
+                        <Pressable
+                          accessibilityRole="button"
+                          onPress={() => {
+                            route.makeFinish(point.id);
+                            close();
+                          }}
+                          testID="route-list-point-finish"
+                        >
+                          <Text style={styles.buttonQuietText}>Make finish</Text>
+                        </Pressable>
+                        {!route.roundTrip ? (
+                          <Pressable
+                            accessibilityRole="button"
+                            onPress={() => {
+                              route.setLegStraight(point.id, !point.straightAfter);
+                              close();
+                            }}
+                            testID="route-list-point-straight"
+                          >
+                            <Text style={styles.buttonQuietText}>
+                              {point.straightAfter
+                                ? 'Follow paths to next'
+                                : 'Straight line to next'}
+                            </Text>
+                          </Pressable>
+                        ) : null}
+                      </>
+                    ) : null}
+                    <TextInput
+                      style={styles.wpActionNameInput}
+                      value={pointName}
+                      onChangeText={setPointName}
+                      placeholder="Name it"
+                      testID="route-list-point-name"
+                    />
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => {
+                        route.renameWaypoint(point.id, pointName);
+                        close();
+                      }}
+                      testID="route-list-point-name-save"
+                    >
+                      <Text style={styles.buttonQuietText}>Save name</Text>
+                    </Pressable>
+                  </View>
+                );
+              })()}
+            {route.waypoints.map((w, i) =>
+              route.offPathM[w.id] ? (
+                <Text key={w.id} style={styles.muted}>
+                  Point {i + 1} is {route.offPathM[w.id]} m from the routed path. The line uses the
+                  nearest mapped way.
+                </Text>
+              ) : null,
+            )}
           </View>
         ) : (
           <Text style={styles.muted}>
@@ -1196,7 +1329,9 @@ export function RoutePanel({
           />
         ) : null}
       </ScrollView>
-      {!transitMode && destination ? (
+      {!transitMode &&
+      destination &&
+      (route.roundTrip || !route.waypoints.some((w) => w.straightAfter)) ? (
         <Pressable
           style={styles.navigate}
           accessibilityRole="button"
@@ -1211,6 +1346,11 @@ export function RoutePanel({
         >
           <Text style={styles.navigateText}>Start</Text>
         </Pressable>
+      ) : !route.roundTrip && route.waypoints.some((w) => w.straightAfter) ? (
+        <Text style={styles.muted}>
+          Direct legs count in the distance, elevation profile and GPX. Use Follow paths for guided
+          navigation.
+        </Text>
       ) : null}
     </BottomSheet>
   );
@@ -1313,6 +1453,13 @@ const styles = StyleSheet.create({
   // No maxHeight any more: the panel's own scroller owns the overflow, and a
   // nested one here would fight it for the gesture.
   wpList: {},
+  wpActionList: { padding: 10, gap: 9, borderRadius: 8, backgroundColor: theme.surfaceMuted },
+  wpActionNameInput: {
+    borderBottomWidth: 1,
+    borderColor: theme.border,
+    padding: 5,
+    color: theme.text,
+  },
   wpRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 },
   wpLabel: {
     width: 26,

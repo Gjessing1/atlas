@@ -206,8 +206,14 @@ export class GarminBridge {
     profile: GarminProfile,
     gpx: string,
     deviceId?: string,
+    sportOf?: string,
   ): Promise<{ id: number; url: string; queued: boolean }> {
-    const result = await this.run(userId, 'uploadCourse', { name, profile, gpx, deviceId }, 90_000);
+    const result = await this.run(
+      userId,
+      'uploadCourse',
+      { name, profile, gpx, deviceId, sportOf },
+      90_000,
+    );
     if (typeof result['id'] !== 'number' || typeof result['url'] !== 'string') {
       throw new Error('Garmin did not confirm the course');
     }

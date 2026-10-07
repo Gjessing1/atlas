@@ -1,4 +1,5 @@
 import {
+  garminCourseProfile,
   useBestSpots,
   useGarmin,
   useMapProfile,
@@ -76,6 +77,7 @@ import {
   routePathToTrackData,
   trackToRoutePoints,
   type RoutePath,
+  type RoutingProfile,
 } from '@atlas/routing';
 import {
   fetchTransitCommute,
@@ -1473,27 +1475,47 @@ function AppInner() {
     [trackProfile],
   );
 
-  const planTrack = useCallback(
-    (track: TrackRecord) => {
-      void data.getTrackData(track.id).then((trackData) => {
-        if (!trackData) return;
-        const points = trackToRoutePoints(trackData);
-        if (points.length < 2) return;
-        route.restore({
-          profile: route.profile,
-          waypoints: points.map((pos, index) => ({
-            pos,
-            ...(index === 0
-              ? { name: `${track.name} start` }
-              : index === points.length - 1
-                ? { name: `${track.name} finish` }
-                : {}),
-          })),
-        });
+  const planTrackId = useCallback(
+    async (trackId: string, name: string, profile: RoutingProfile) => {
+      const trackData = await data.getTrackData(trackId);
+      if (!trackData) return;
+      const points = trackToRoutePoints(trackData);
+      if (points.length < 2) return;
+      route.restore({
+        profile,
+        waypoints: points.map((pos, index) => ({
+          pos,
+          ...(index === 0
+            ? { name: `${name} start` }
+            : index === points.length - 1
+              ? { name: `${name} finish` }
+              : {}),
+        })),
       });
     },
     [data, route],
   );
+  const planTrack = useCallback(
+    (track: TrackRecord) => void planTrackId(track.id, track.name, route.profile),
+    [planTrackId, route.profile],
+  );
+
+  // A Garmin course reshaped in the planner is replaced on Garmin from the route panel.
+  const { startCourseEdit, cancelCourseEdit } = garmin;
+  const editGarminCourse = useCallback(
+    async (id: string) => {
+      const edit = await startCourseEdit(id);
+      if (edit) await planTrackId(edit.trackId, edit.name, garminCourseProfile(edit.type));
+    },
+    [startCourseEdit, planTrackId],
+  );
+  // Closing the planner ends the edit; the transition, not the state, so the edit that is
+  // just being opened (planner still closed) survives.
+  const plannerWasActive = useRef(route.active);
+  useEffect(() => {
+    if (plannerWasActive.current && !route.active) cancelCourseEdit();
+    plannerWasActive.current = route.active;
+  }, [route.active, cancelCourseEdit]);
 
   const savePermit = useCallback(
     async (input: string, options?: ImportOptions) => {
@@ -2260,6 +2282,7 @@ function AppInner() {
             onPickDestination={dest.pick}
             onShowTrack={showTrack}
             onPlanTrack={planTrack}
+            onEditGarminCourse={(id) => void editGarminCourse(id)}
             onImportTracks={importTracks}
             onImportInatur={importInatur}
           />

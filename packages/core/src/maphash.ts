@@ -14,6 +14,8 @@ import type { LatLng } from './geo.js';
 export interface RoutePlanState {
   profile: string;
   points: LatLng[];
+  /** Zero-based indexes of legs drawn directly between consecutive points. */
+  directLegs?: number[];
   /** Round-trip loop length in km — set when the plan comes home to its start. */
   roundTripKm?: number;
   roundTripDirection?: 'either' | 'clockwise' | 'counterclockwise';
@@ -41,6 +43,16 @@ export function encodeMapHash(state: MapViewState): string {
   if (plan && plan.points.length > 0 && /^[a-z_-]+$/.test(plan.profile)) {
     const points = plan.points.map((p) => `${round(p.lat, 5)},${round(p.lng, 5)}`).join('/');
     hash += `&route=${plan.profile}/${points}`;
+    if (plan.directLegs?.length) {
+      const valid = [
+        ...new Set(
+          plan.directLegs.filter(
+            (i) => Number.isInteger(i) && i >= 0 && i < plan.points.length - 1,
+          ),
+        ),
+      ];
+      if (valid.length) hash += `&direct=${valid.join(',')}`;
+    }
     if (plan.roundTripKm !== undefined) {
       hash += `&loop=${round(plan.roundTripKm, 2)}`;
       if (plan.roundTripDirection && plan.roundTripDirection !== 'either') {
@@ -64,6 +76,18 @@ function decodeRoutePlan(hash: string): RoutePlanState | null {
   if (points.length === 0) return null;
 
   const plan: RoutePlanState = { profile: match[1]!, points };
+  const direct = /[#&]direct=([0-9,]+)/.exec(hash)?.[1];
+  if (direct) {
+    const indexes = [
+      ...new Set(
+        direct
+          .split(',')
+          .map(Number)
+          .filter((i) => Number.isInteger(i) && i >= 0 && i < points.length - 1),
+      ),
+    ];
+    if (indexes.length) plan.directLegs = indexes;
+  }
   const loopMatch = /[#&]loop=([0-9.]+)/.exec(hash);
   if (loopMatch) {
     const km = Number(loopMatch[1]);

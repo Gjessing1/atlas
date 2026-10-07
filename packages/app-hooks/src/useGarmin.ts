@@ -40,6 +40,8 @@ export interface GarminCourse {
 
 export interface GarminDelivery {
   deviceName: string;
+  /** Recorded since replacing an edited course re-sends to the same watch. */
+  deviceId?: string;
   queuedAt: number;
   /** Garmin's course revision when the send request succeeded. */
   courseUpdated: number | null;
@@ -55,6 +57,46 @@ export function garminDeliveryLine(course: GarminCourse, delivery: GarminDeliver
   if (changed || delivery.changed)
     return `Changed since last sent to ${delivery.deviceName} · send again`;
   return `Sent to ${delivery.deviceName} ${fmtShortDate(delivery.queuedAt)} · watch sync unverified`;
+}
+
+/** A Garmin course open in the planner for reshaping, saved into Atlas as `trackId`. */
+export interface GarminCourseEdit {
+  id: string;
+  name: string;
+  type: string | null;
+  trackId: string;
+}
+
+/**
+ * An edited course now on Garmin as `newId`. The old one stays until the user confirms its
+ * deletion: Garmin's PUT cannot replace geometry safely, and create-then-delete leaves a
+ * working course on the account if either step fails.
+ */
+export interface GarminReplacement {
+  oldId: string;
+  newId: string;
+  name: string;
+  /** The watch the new course was queued for, when that succeeded. */
+  queuedTo: string | null;
+}
+
+/** The planner profile to reshape a course in: its sport's closest routing costing. */
+export function garminCourseProfile(type: string | null): RoutingProfile {
+  if (!type) return 'hike';
+  if (type.includes('running')) return 'run';
+  if (type.includes('cycling') || type.includes('biking')) return 'bike';
+  if (type === 'walking') return 'foot';
+  return 'hike';
+}
+
+/** The watch an edited course should go back to: the one it was last sent to. */
+export function garminResendDevice(
+  delivery: GarminDelivery | undefined,
+  devices: readonly GarminDevice[],
+): string {
+  if (delivery?.deviceId && devices.some((device) => device.id === delivery.deviceId))
+    return delivery.deviceId;
+  return devices.find((device) => device.name === delivery?.deviceName)?.id ?? '';
 }
 
 /** "Trail running · 18.0 km · ↗ 536 m · 5 Jul" — the second line of a course row. */
@@ -180,6 +222,20 @@ export interface GarminState {
   sendCourse: (id: string, deviceId: string) => Promise<boolean>;
   /** Copies the course into Atlas (Garmin courses › sport); resolves to the track id. */
   saveCourse: (id: string) => Promise<string | null>;
+  /** The course being reshaped in the planner, or null. */
+  courseEdit: GarminCourseEdit | null;
+  /** Saves the course into Atlas if needed and marks it as being edited; resolves to its track. */
+  startCourseEdit: (id: string) => Promise<GarminCourseEdit | null>;
+  cancelCourseEdit: () => void;
+  /**
+   * Creates the reshaped course on Garmin under the same name and sport, queues it for
+   * `deviceId`, and files the new line in Atlas beside the old copy. The old Garmin course
+   * is left for `deleteReplacedCourse`.
+   */
+  replaceCourse: (path: RoutePath, profile: RoutingProfile, deviceId?: string) => Promise<boolean>;
+  replacement: GarminReplacement | null;
+  deleteReplacedCourse: () => Promise<boolean>;
+  keepReplacedCourse: () => void;
 }
 
 const activityOffsetKey = (email: string) => `local.garmin.activityOffset.${email}`;
@@ -222,6 +278,8 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
   const [pendingCourseId, setPendingCourseId] = useState<string | null>(null);
   const [courseNotice, setCourseNotice] = useState<string | null>(null);
   const [courseError, setCourseError] = useState<string | null>(null);
+  const [courseEdit, setCourseEdit] = useState<GarminCourseEdit | null>(null);
+  const [replacement, setReplacement] = useState<GarminReplacement | null>(null);
   const request = sync.accountRequest;
   // Settings are read once local storage is open: before that `getSetting` answers null, and
   // a schedule read then would look switched off for the whole session.
@@ -261,6 +319,8 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
     setCourses(null);
     setDeliveries(new Map());
     setCourseNotice(null);
+    setCourseEdit(null);
+    setReplacement(null);
     if (sync.email) void refresh();
     else {
       setConnected(null);
@@ -383,6 +443,7 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
         if (response.queued && deviceId && Number.isFinite(response.id)) {
           const delivery = {
             deviceName: devices.find((device) => device.id === deviceId)?.name ?? 'your device',
+            deviceId,
             queuedAt: Date.now(),
             courseUpdated: null,
           };
@@ -655,10 +716,12 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
               )
                 return null;
               const updated = 'courseUpdated' in value ? value.courseUpdated : null;
+              const deviceId = 'deviceId' in value ? value.deviceId : undefined;
               return [
                 course.id,
                 {
                   deviceName: value.deviceName,
+                  ...(typeof deviceId === 'string' ? { deviceId } : {}),
                   queuedAt: value.queuedAt,
                   courseUpdated: typeof updated === 'number' ? updated : null,
                   changed: 'changed' in value && value.changed === true,
@@ -760,6 +823,7 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
         const device = devices.find((item) => item.id === deviceId)?.name ?? 'your device';
         const delivery = {
           deviceName: device,
+          deviceId,
           queuedAt: Date.now(),
           courseUpdated: courses?.find((course) => course.id === id)?.updated ?? null,
         };
@@ -799,6 +863,114 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
     [courseAction, courses, data, request, savedCourses],
   );
 
+  const startCourseEdit = useCallback(
+    async (id: string) => {
+      const course = courses?.find((item) => item.id === id);
+      const trackId = await saveCourse(id);
+      if (!trackId) return null;
+      const edit = {
+        id,
+        name: course?.name ?? 'Garmin course',
+        type: course?.type ?? null,
+        trackId,
+      };
+      setCourseEdit(edit);
+      setReplacement(null);
+      setCourseNotice(null);
+      if (devices.length === 0) void loadDevices();
+      return edit;
+    },
+    [courses, devices.length, loadDevices, saveCourse],
+  );
+
+  const cancelCourseEdit = useCallback(() => setCourseEdit(null), []);
+
+  const replaceCourse = useCallback(
+    async (path: RoutePath, profile: RoutingProfile, deviceId?: string) => {
+      const edit = courseEdit;
+      if (!edit) return false;
+      return (
+        (await courseAction(edit.id, async () => {
+          const storage = data.storage;
+          if (!storage) throw new Error('Local storage is unavailable.');
+          if (profile === 'car')
+            throw new Error('Garmin courses are for walking, running, hiking and cycling.');
+          const gpx = buildGpx(routePathToTrackData(path, edit.name));
+          const created = await request<{ id: number; url: string; queued: boolean }>(
+            '/api/garmin/course',
+            { name: edit.name, profile, gpx, sportOf: edit.id, ...(deviceId ? { deviceId } : {}) },
+          );
+          const newId = String(created.id);
+          const deviceName = deviceId
+            ? (devices.find((device) => device.id === deviceId)?.name ?? 'your device')
+            : null;
+          if (created.queued && deviceId && deviceName) {
+            const delivery = { deviceName, deviceId, queuedAt: Date.now(), courseUpdated: null };
+            await data.setSetting(`garmin.delivery.${newId}`, JSON.stringify(delivery));
+            setDeliveries((current) => new Map(current).set(newId, delivery));
+          }
+          // The Atlas copy follows the course: the new line is filed where the old copy was
+          // and carries the new id; the old copy stays (it is the user's data) but is named
+          // for what it now is, so the folder does not hold two identical-looking entries.
+          const old = data.tracks.find((track) => track.id === edit.trackId);
+          const folder =
+            old?.collectionId ??
+            (await sportFolders(storage, COURSES_FOLDER).forType(edit.type)).id;
+          await storage.createTrack({
+            name: edit.name,
+            gpx,
+            stats: computeTrackStats(parseGpx(gpx)) as unknown as Record<string, number>,
+            collectionId: folder,
+            notes: 'Edited in Atlas and sent to Garmin Connect',
+            tags: [`${GARMIN_COURSE_TAG}${newId}`, ...(edit.type ? [edit.type] : [])],
+          });
+          if (old) {
+            await storage.updateTrack(old.id, {
+              name: `${old.name} (before edit)`,
+              tags: old.tags.filter((tag) => !tag.startsWith(GARMIN_COURSE_TAG)),
+              visible: false,
+            });
+          }
+          await data.refreshAll();
+          setCourses(null);
+          setCourseEdit(null);
+          setReplacement({
+            oldId: edit.id,
+            newId,
+            name: edit.name,
+            queuedTo: created.queued && deviceName ? deviceName : null,
+          });
+          return true;
+        })) === true
+      );
+    },
+    [courseAction, courseEdit, data, devices, request],
+  );
+
+  const deleteReplacedCourse = useCallback(async () => {
+    const done = replacement;
+    if (!done) return false;
+    const deleted = await courseAction(done.oldId, async () => {
+      await request(`/api/garmin/courses/${done.oldId}`, undefined, 'DELETE');
+      await data.setSetting(`garmin.delivery.${done.oldId}`, '');
+      setDeliveries((current) => {
+        const next = new Map(current);
+        next.delete(done.oldId);
+        return next;
+      });
+      setCourses((list) => list?.filter((course) => course.id !== done.oldId) ?? null);
+      setCourseNotice(`Deleted the old “${done.name}” from Garmin Connect.`);
+      return true;
+    });
+    if (deleted) setReplacement(null);
+    return deleted === true;
+  }, [courseAction, data.setSetting, replacement, request]);
+
+  const keepReplacedCourse = useCallback(() => {
+    setReplacement(null);
+    setCourseNotice('Both versions are in Garmin Connect.');
+  }, []);
+
   return {
     connected,
     mfaRequired,
@@ -837,5 +1009,12 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
     deleteCourse,
     sendCourse,
     saveCourse,
+    courseEdit,
+    startCourseEdit,
+    cancelCourseEdit,
+    replaceCourse,
+    replacement,
+    deleteReplacedCourse,
+    keepReplacedCourse,
   };
 }

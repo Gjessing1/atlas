@@ -28,7 +28,12 @@ services:
       PHOTON_AREA: europe
       # 2g served the Norway index (measured 366 MB RSS). Europe is ~45x the
       # dump, and the import is the memory-hungry half of the job.
-      JAVA_OPTS: -Xmx4g
+      # The cap only bounds peaks. G1 never returns idle heap by itself
+      # (G1PeriodicGCInterval defaults to 0): after a burst of searches Photon
+      # sat on ~2 GB it no longer used. A periodic cycle runs only while idle,
+      # so query latency is untouched; the 46 GB index is mmapped page cache,
+      # which the kernel already reclaims on its own.
+      JAVA_OPTS: -Xmx4g -XX:G1PeriodicGCInterval=60000 -XX:MinHeapFreeRatio=10 -XX:MaxHeapFreeRatio=30
     ports:
       - '127.0.0.1:2322:2322'
     volumes:

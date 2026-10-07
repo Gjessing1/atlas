@@ -11,19 +11,35 @@ const ALT_CASING = 'atlas-route-alt-casing';
 const ALT_LINE = 'atlas-route-alt-line';
 const SEL_CASING = 'atlas-route-sel-casing';
 const SEL_LINE = 'atlas-route-sel-line';
+const SEL_STRAIGHT = 'atlas-route-sel-straight';
 const SEL_ARROWS = 'atlas-route-sel-arrows';
-const ROUTE_LAYERS = [ALT_CASING, ALT_LINE, SEL_CASING, SEL_LINE, SEL_ARROWS];
+const ROUTE_LAYERS = [ALT_CASING, ALT_LINE, SEL_CASING, SEL_LINE, SEL_STRAIGHT, SEL_ARROWS];
 const ROUTE_COLOR = '#7048c9';
 
 function routeCollection(paths: RoutePath[], selected: number): FeatureCollection {
-  const features: Feature[] = paths.map((path, index) => ({
-    type: 'Feature',
-    properties: { index, selected: index === selected },
-    geometry: {
-      type: 'LineString',
-      coordinates: path.points.map((p) => [p.lng, p.lat]),
-    },
-  }));
+  const features: Feature[] = paths.flatMap((path, index) => {
+    const straightEdges = new Set<number>();
+    for (const range of path.straightRanges ?? []) {
+      for (let i = range.start; i < range.end; i++) straightEdges.add(i);
+    }
+    const pieces: Feature[] = [];
+    let start = 0;
+    while (start < path.points.length - 1) {
+      const straight = straightEdges.has(start);
+      let end = start + 1;
+      while (end < path.points.length - 1 && straightEdges.has(end) === straight) end++;
+      pieces.push({
+        type: 'Feature',
+        properties: { index, selected: index === selected, straight },
+        geometry: {
+          type: 'LineString',
+          coordinates: path.points.slice(start, end + 1).map((p) => [p.lng, p.lat]),
+        },
+      });
+      start = end;
+    }
+    return pieces;
+  });
   // Draw the selected path last within each layer so it wins overlaps.
   features.sort((a, b) => Number(a.properties!['selected']) - Number(b.properties!['selected']));
   return { type: 'FeatureCollection', features };
@@ -51,6 +67,7 @@ export function useRouteLayers(
   // Handlers are registered once per map; latest state flows through a ref.
   const routeRef = useRef(route);
   routeRef.current = route;
+  const draggingRef = useRef(false);
 
   // Label a stop the user placed by hand (click or drag) with whatever is
   // there. In-flight lookups are aborted when the hook unmounts.
@@ -95,6 +112,11 @@ export function useRouteLayers(
       if (!map.getLayer(ALT_CASING)) {
         const line = { 'line-cap': 'round', 'line-join': 'round' } as const;
         const selected: maplibregl.ExpressionSpecification = ['to-boolean', ['get', 'selected']];
+        const selectedFollow: maplibregl.ExpressionSpecification = [
+          'all',
+          selected,
+          ['!', ['to-boolean', ['get', 'straight']]],
+        ];
         const unselected: maplibregl.ExpressionSpecification = ['!', selected];
         map.addLayer({
           id: ALT_CASING,
@@ -124,9 +146,17 @@ export function useRouteLayers(
           id: SEL_LINE,
           type: 'line',
           source: SOURCE_ID,
-          filter: selected,
+          filter: selectedFollow,
           layout: line,
           paint: { 'line-color': ROUTE_COLOR, 'line-width': 4.5 },
+        });
+        map.addLayer({
+          id: SEL_STRAIGHT,
+          type: 'line',
+          source: SOURCE_ID,
+          filter: ['all', selected, ['to-boolean', ['get', 'straight']]],
+          layout: line,
+          paint: { 'line-color': ROUTE_COLOR, 'line-width': 4.5, 'line-dasharray': [2, 2] },
         });
         // Travel-direction chevrons along the selected path — the only cue to
         // which way a round trip runs (its Reverse button flips these).
@@ -136,7 +166,7 @@ export function useRouteLayers(
           id: SEL_ARROWS,
           type: 'symbol',
           source: SOURCE_ID,
-          filter: selected,
+          filter: selectedFollow,
           layout: {
             'symbol-placement': 'line',
             'symbol-spacing': 80,
@@ -167,7 +197,7 @@ export function useRouteLayers(
   // map. Frame the selected route inside the part that remains visible: beside
   // the desktop panel, or above the phone sheet.
   useEffect(() => {
-    if (!map || !route.active || hideLine) return;
+    if (!map || !route.active || hideLine || draggingRef.current) return;
     const path = route.paths?.[route.selectedPath];
     if (!path || path.points.length < 2) return;
     const bounds = new maplibregl.LngLatBounds();
@@ -229,6 +259,73 @@ export function useRouteLayers(
 
   // ---- waypoint markers (DOM overlays survive style swaps by themselves) ----
   const markersRef = useRef(new Map<number, maplibregl.Marker>());
+  const popupRef = useRef<maplibregl.Popup | null>(null);
+  const showPointActions = useCallback(
+    (id: number, at: LatLng) => {
+      if (!map) return;
+      const r = routeRef.current;
+      const index = r.waypoints.findIndex((w) => w.id === id);
+      if (index < 0) return;
+      const waypoint = r.waypoints[index]!;
+      popupRef.current?.remove();
+      const content = document.createElement('div');
+      content.className = 'route-point-actions';
+      const title = document.createElement('strong');
+      title.textContent = waypoint.name ?? `Point ${index + 1}`;
+      content.append(title);
+      const action = (label: string, run: () => void) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = label;
+        button.addEventListener('click', (event) => {
+          event.stopPropagation();
+          run();
+          popupRef.current?.remove();
+        });
+        content.append(button);
+      };
+      action('Remove', () => routeRef.current.removeWaypoint(id));
+      if (index > 0) action('Make start', () => routeRef.current.makeStart(id));
+      if (index < r.waypoints.length - 1) {
+        action('Make finish', () => routeRef.current.makeFinish(id));
+        if (!r.roundTrip)
+          action(waypoint.straightAfter ? 'Follow paths to next' : 'Straight line to next', () =>
+            routeRef.current.setLegStraight(id, !waypoint.straightAfter),
+          );
+      }
+      const nameButton = document.createElement('button');
+      nameButton.type = 'button';
+      nameButton.textContent = 'Name it';
+      nameButton.addEventListener('click', (event) => {
+        event.stopPropagation();
+        nameButton.remove();
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = waypoint.name ?? '';
+        input.placeholder = 'Point name';
+        input.setAttribute('aria-label', 'Point name');
+        const save = document.createElement('button');
+        save.type = 'button';
+        save.textContent = 'Save name';
+        const commit = () => {
+          routeRef.current.renameWaypoint(id, input.value);
+          popupRef.current?.remove();
+        };
+        input.addEventListener('keydown', (key) => {
+          if (key.key === 'Enter') commit();
+        });
+        save.addEventListener('click', commit);
+        content.append(input, save);
+        input.focus();
+      });
+      content.append(nameButton);
+      popupRef.current = new maplibregl.Popup({ closeButton: false, offset: 22 })
+        .setLngLat([at.lng, at.lat])
+        .setDOMContent(content)
+        .addTo(map);
+    },
+    [map],
+  );
   useEffect(() => {
     if (!map) return;
     const markers = markersRef.current;
@@ -252,12 +349,28 @@ export function useRouteLayers(
         marker = new maplibregl.Marker({ element: el, draggable: true });
         marker.setLngLat(waypoint.pos).addTo(map);
         const id = waypoint.id;
+        el.addEventListener('click', (event) => {
+          event.stopPropagation();
+          showPointActions(
+            id,
+            routeRef.current.waypoints.find((w) => w.id === id)?.pos ?? waypoint.pos,
+          );
+        });
+        marker.on('dragstart', () => {
+          draggingRef.current = true;
+          popupRef.current?.remove();
+        });
+        marker.on('drag', () => {
+          const point = marker!.getLngLat();
+          routeRef.current.previewWaypointMove(id, { lat: point.lat, lng: point.lng });
+        });
         marker.on('dragend', () => {
+          draggingRef.current = false;
           const lngLat = marker!.getLngLat();
           const at = { lat: lngLat.lat, lng: lngLat.lng };
           // The move drops the old label (it described the old spot); look up
           // what is at the new one.
-          routeRef.current.moveWaypointTo(id, at);
+          routeRef.current.finishWaypointMove(id, at);
           labelStop(id, at);
         });
         markers.set(id, marker);
@@ -266,7 +379,7 @@ export function useRouteLayers(
       }
       marker.getElement().textContent = label;
     });
-  }, [map, route.active, route.waypoints, route.roundTrip, labelStop]);
+  }, [map, route.active, route.waypoints, route.roundTrip, labelStop, showPointActions]);
 
   // Drop all markers when the map goes away or route mode ends entirely.
   useEffect(() => {
@@ -274,6 +387,7 @@ export function useRouteLayers(
     return () => {
       for (const marker of markers.values()) marker.remove();
       markers.clear();
+      popupRef.current?.remove();
     };
   }, [map]);
 }

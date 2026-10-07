@@ -110,6 +110,8 @@ export { pathViaLabels } from './via.js';
 export { sortRouteChoices } from './choices.js';
 export { routeAlternativeLabelPoint } from './alternatives.js';
 export { viaInsertIndex } from './insert.js';
+export { routeMixedPlan } from './mixed.js';
+export { closestPointOnRoute } from './closest.js';
 export { trackToRoutePoints } from './track.js';
 export {
   routeSurfaceAt,

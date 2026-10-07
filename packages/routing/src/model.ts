@@ -348,6 +348,8 @@ export function formatExitSign(sign: ExitSign): string {
 export interface RoutePath {
   /** Geometry with elevation when the server has DEM data. */
   points: TrackPoint[];
+  /** Inclusive vertex ranges drawn as direct, dashed legs in the planner. */
+  straightRanges?: { start: number; end: number }[];
   distanceM: number;
   /** Travel time — the ETA is `departure + timeMs`. */
   timeMs: number;

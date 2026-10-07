@@ -24,6 +24,19 @@ export function activityDate(track: TrackRecord): string | null {
   return /^Recorded (\d{4}-\d{2}-\d{2})/.exec(track.notes)?.[1] ?? null;
 }
 
+/**
+ * A saved area (an iNatur permit boundary), not a line to follow. Saves since the area overlay
+ * carry `area`; older ones (Sleikebekk) have only the tag or the `iNatur …` name, and were
+ * listed among Routes & courses.
+ */
+export function isAreaTrack(track: TrackRecord): boolean {
+  return (
+    track.area !== null ||
+    track.tags.some((tag) => tag.toLowerCase() === 'inatur permit') ||
+    track.name.toLowerCase().startsWith('inatur')
+  );
+}
+
 export function libraryTrackKind(track: TrackRecord): 'course' | 'activity' | 'track' {
   if (track.tags.some((tag) => tag.startsWith(GARMIN_ACTIVITY_TAG))) return 'activity';
   if (track.tags.some((tag) => tag.startsWith(GARMIN_COURSE_TAG))) return 'course';
@@ -52,7 +65,7 @@ export function libraryTracks(
   return tracks
     .filter((track) => {
       const kind = libraryTrackKind(track);
-      if (view === 'activities' ? kind !== 'activity' : kind === 'activity' || track.area !== null)
+      if (view === 'activities' ? kind !== 'activity' : kind === 'activity' || isAreaTrack(track))
         return false;
       if (sport && libraryTrackSport(track) !== sport) return false;
       if (year && activityYear(track) !== year) return false;

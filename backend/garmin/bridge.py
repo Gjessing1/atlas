@@ -190,6 +190,13 @@ def main():
                                     files={"file": ("atlas-route.gpx", gpx,
                                                     "application/gpx+xml")}, api=True)
         activity_type = {"run": 1, "bike": 2, "hike": 3, "foot": 9}[command["profile"]]
+        if command.get("sportOf"):
+            # A replacement keeps the sport of the course it replaces, including sports
+            # (ice skating, say) that no routing profile maps to.
+            original = garmin.connectapi(
+                f"/course-service/course/{parse_course_id(command['sportOf'])}")
+            if isinstance(original.get("activityTypePk"), int):
+                activity_type = original["activityTypePk"]
         payload = course_payload(parsed, command["name"], activity_type)
         created = garmin.client.post("connect", "/course-service/course",
                                      json=payload, api=True)

@@ -298,8 +298,9 @@ before that destination. Also:
 fixture: any email and password signs in, sync accepts pushes and returns nothing, and
 `/api/garmin/*` serves 12 courses, two watches and 205 GPS activities in the sport and year mix of
 a real account (mostly running, a tail of ten other sports, 2022–2026). Point the app at it
-(Settings → System → `http://10.0.2.2:3199`), sign in under Account & data, and Collections gains
-its Garmin tab; the ↻ on its Activities card imports everything. The release regression does
+(Settings → System → `http://10.0.2.2:3199`), sign in under Account & data, and Collections fills
+in: the course library lists under Routes, the import card (its ↻ imports everything) sits atop
+Activities, and the Explore-locations import under Places. There is no Garmin tab since v0.254.0. The release regression does
 not set the variable — it runs signed out, and the health check reports sync as unavailable.
 
 ## Artifacts

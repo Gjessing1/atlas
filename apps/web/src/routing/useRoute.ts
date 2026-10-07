@@ -30,5 +30,5 @@ const route: RouteFn = async (query, signal) => {
 };
 
 export function useRoute(vehicle?: VehicleProfile | null): RoutePlanner {
-  return useSharedRoute(route, vehicle);
+  return useSharedRoute(route, vehicle, elevation);
 }

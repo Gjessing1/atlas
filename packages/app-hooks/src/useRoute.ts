@@ -1,7 +1,9 @@
 import type { LatLng, RoutePlanState } from '@atlas/core';
 import {
+  closestPointOnRoute,
   defaultRoutePreferences,
   optimizeWaypointOrder,
+  routeMixedPlan,
   ROUTING_PROFILES,
   RoutingError,
   type RoutePath,
@@ -11,6 +13,7 @@ import {
   type RouteResult,
   type RoundTripDirection,
   type RoutingProfile,
+  type RouteElevationTransport,
 } from '@atlas/routing';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -29,6 +32,8 @@ export interface RouteWaypoint {
    * coordinate, ignored by road routing and dropped whenever the point moves.
    */
   transitStopId?: string;
+  /** Draw the leg from this point to the next directly, without road routing. */
+  straightAfter?: boolean;
 }
 
 /**
@@ -38,7 +43,7 @@ export interface RouteWaypoint {
  */
 export interface StoredRoutePlan {
   profile: RoutingProfile;
-  waypoints: { pos: LatLng; name?: string; transitStopId?: string }[];
+  waypoints: { pos: LatLng; name?: string; transitStopId?: string; straightAfter?: boolean }[];
   /** The sole waypoint was supplied as the destination; the start is still empty. */
   missingStart?: boolean;
   roundTripKm?: number;
@@ -61,6 +66,10 @@ export function routePlanState(plan: StoredRoutePlan): RoutePlanState {
     profile: plan.profile,
     points: plan.waypoints.map((w) => w.pos),
   };
+  const directLegs = plan.waypoints.flatMap((w, i) =>
+    w.straightAfter && i < plan.waypoints.length - 1 ? [i] : [],
+  );
+  if (directLegs.length) state.directLegs = directLegs;
   if (plan.roundTripKm !== undefined) state.roundTripKm = plan.roundTripKm;
   if (plan.roundTripDirection !== undefined) state.roundTripDirection = plan.roundTripDirection;
   return state;
@@ -99,6 +108,8 @@ export interface RoutePlanner {
   selectedPath: number;
   loading: boolean;
   error: string | null;
+  /** Routed stops more than 75 m from the drawn path, keyed by waypoint id. */
+  offPathM: Record<number, number>;
   /**
    * Trip time per road profile for the mode picker, so each mode can show its
    * duration ("🚗 24 min · 🚲 1 h 10") before one is committed to. Filled by a
@@ -144,6 +155,10 @@ export interface RoutePlanner {
   insertWaypoint: (index: number, pos: LatLng, name?: string, transitStopId?: string) => number;
   /** Move a stop; its label is dropped, since it no longer describes the spot. */
   moveWaypointTo: (id: number, pos: LatLng) => void;
+  /** Preview a map drag without adding an undo entry for every move event. */
+  previewWaypointMove: (id: number, pos: LatLng) => void;
+  /** Finish a previewed drag as one undoable edit. */
+  finishWaypointMove: (id: number, pos: LatLng) => void;
   /**
    * Point an existing stop somewhere else entirely, keeping its place in the
    * order. This is what "tap From and pick another address" means: appending
@@ -157,8 +172,17 @@ export interface RoutePlanner {
    * gained a name keeps what it has.
    */
   nameWaypoint: (id: number, name: string, at: LatLng) => void;
+  renameWaypoint: (id: number, name: string) => void;
   removeWaypoint: (id: number) => void;
   reorderWaypoint: (from: number, to: number) => void;
+  setLegStraight: (id: number, straight: boolean) => void;
+  makeStart: (id: number) => void;
+  makeFinish: (id: number) => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  dragging: boolean;
+  undo: () => void;
+  redo: () => void;
   reverse: () => void;
   clear: () => void;
   /** Reorder intermediate stops for a shorter tour (endpoints stay). */
@@ -171,7 +195,11 @@ export interface RoutePlanner {
   selectPath: (index: number) => void;
 }
 
-export function useRoute(route: RouteFn, vehicle?: VehicleProfile | null): RoutePlanner {
+export function useRoute(
+  route: RouteFn,
+  vehicle?: VehicleProfile | null,
+  elevations?: RouteElevationTransport,
+): RoutePlanner {
   const [active, setActive] = useState(false);
   const [profile, setProfile] = useState<RoutingProfile>('car');
   const [preferencesByProfile, setPreferencesByProfile] = useState<
@@ -192,6 +220,62 @@ export function useRoute(route: RouteFn, vehicle?: VehicleProfile | null): Route
   );
   const [waypoints, setWaypoints] = useState<RouteWaypoint[]>([]);
   const [missingStart, setMissingStart] = useState(false);
+  type EditSnapshot = { waypoints: RouteWaypoint[]; missingStart: boolean };
+  const waypointsRef = useRef(waypoints);
+  const missingStartRef = useRef(missingStart);
+  waypointsRef.current = waypoints;
+  missingStartRef.current = missingStart;
+  const editHistory = useRef<{ past: EditSnapshot[]; future: EditSnapshot[] }>({
+    past: [],
+    future: [],
+  });
+  const dragOrigins = useRef(new Map<number, EditSnapshot>());
+  const [dragging, setDragging] = useState(false);
+  const [historyVersion, setHistoryVersion] = useState(0);
+  const snapshot = useCallback(
+    (): EditSnapshot => ({
+      waypoints: waypointsRef.current,
+      missingStart: missingStartRef.current,
+    }),
+    [],
+  );
+  const applySnapshot = useCallback((next: EditSnapshot) => {
+    waypointsRef.current = next.waypoints;
+    missingStartRef.current = next.missingStart;
+    setWaypoints(next.waypoints);
+    setMissingStart(next.missingStart);
+  }, []);
+  const edit = useCallback(
+    (next: EditSnapshot) => {
+      const before = snapshot();
+      if (before.waypoints === next.waypoints && before.missingStart === next.missingStart) return;
+      editHistory.current.past.push(before);
+      editHistory.current.future = [];
+      applySnapshot(next);
+      setHistoryVersion((version) => version + 1);
+    },
+    [snapshot, applySnapshot],
+  );
+  const resetHistory = useCallback(() => {
+    editHistory.current = { past: [], future: [] };
+    dragOrigins.current.clear();
+    setDragging(false);
+    setHistoryVersion((version) => version + 1);
+  }, []);
+  const undo = useCallback(() => {
+    const previous = editHistory.current.past.pop();
+    if (!previous) return;
+    editHistory.current.future.push(snapshot());
+    applySnapshot(previous);
+    setHistoryVersion((version) => version + 1);
+  }, [snapshot, applySnapshot]);
+  const redo = useCallback(() => {
+    const next = editHistory.current.future.pop();
+    if (!next) return;
+    editHistory.current.past.push(snapshot());
+    applySnapshot(next);
+    setHistoryVersion((version) => version + 1);
+  }, [snapshot, applySnapshot]);
   const [roundTrip, setRoundTripState] = useState(false);
   const [roundTripKm, setRoundTripKm] = useState(10);
   const [roundTripDirection, setRoundTripDirection] = useState<RoundTripDirection>('either');
@@ -200,6 +284,8 @@ export function useRoute(route: RouteFn, vehicle?: VehicleProfile | null): Route
   const [selectedPath, setSelectedPath] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [offPathM, setOffPathM] = useState<Record<number, number>>({});
+  const pendingSnap = useRef<{ id: number; pos: LatLng } | null>(null);
   const [modeTimes, setModeTimes] = useState<Partial<Record<RoutingProfile, ModeTime>>>({});
   const idRef = useRef(1);
   const abortRef = useRef<AbortController | null>(null);
@@ -209,6 +295,8 @@ export function useRoute(route: RouteFn, vehicle?: VehicleProfile | null): Route
   // with the background mode-times pass, spin into a render/request loop.
   const routeRef = useRef(route);
   routeRef.current = route;
+  const elevationsRef = useRef(elevations);
+  elevationsRef.current = elevations;
 
   const nextWaypoint = useCallback(
     (pos: LatLng, name?: string, transitStopId?: string): RouteWaypoint => ({
@@ -226,6 +314,7 @@ export function useRoute(route: RouteFn, vehicle?: VehicleProfile | null): Route
     const enough = roundTrip ? waypoints.length >= 1 : waypoints.length >= 2;
     if (!active || !enough) {
       setPaths(null);
+      setOffPathM({});
       setError(null);
       setLoading(false);
       return;
@@ -262,9 +351,52 @@ export function useRoute(route: RouteFn, vehicle?: VehicleProfile | null): Route
             instructions: waypoints.length === 2 || profile !== 'car',
           };
       try {
-        const result = await routeRef.current(query, controller.signal);
+        const result = await routeMixedPlan(
+          query,
+          waypoints.map((waypoint) => waypoint.straightAfter === true),
+          routeRef.current,
+          elevationsRef.current,
+          controller.signal,
+        );
         // A superseded request can resolve after its abort — don't paint it.
         if (controller.signal.aborted) return;
+        const primary = result.paths[0];
+        const moved = pendingSnap.current;
+        if (primary && moved) {
+          pendingSnap.current = null;
+          const current = waypointsRef.current.find((w) => w.id === moved.id);
+          const closest = closestPointOnRoute(primary.points, moved.pos);
+          const movedIndex = waypoints.findIndex((w) => w.id === moved.id);
+          if (
+            current &&
+            current.pos.lat === moved.pos.lat &&
+            current.pos.lng === moved.pos.lng &&
+            closest &&
+            closest.distanceM > 0.5 &&
+            closest.distanceM <= 75 &&
+            !current.straightAfter &&
+            !waypoints[movedIndex - 1]?.straightAfter
+          ) {
+            const before = snapshot();
+            applySnapshot({
+              ...before,
+              waypoints: before.waypoints.map((w) =>
+                w.id === moved.id ? { ...w, pos: closest.point } : w,
+              ),
+            });
+            return;
+          }
+        }
+        const distances: Record<number, number> = {};
+        if (primary) {
+          waypoints.forEach((point, index) => {
+            if (point.straightAfter || waypoints[index - 1]?.straightAfter) return;
+            const closest = closestPointOnRoute(primary.points, point.pos);
+            if (closest && closest.distanceM > 75)
+              distances[point.id] = Math.round(closest.distanceM);
+          });
+        }
+        setOffPathM(distances);
         setPaths(result.paths);
         setSelectedPath(0);
         setError(null);
@@ -272,6 +404,7 @@ export function useRoute(route: RouteFn, vehicle?: VehicleProfile | null): Route
       } catch (err) {
         if (controller.signal.aborted) return; // superseded or panel closed
         setPaths(null);
+        setOffPathM({});
         setLoading(false);
         setError(err instanceof RoutingError ? err.message : 'Routing service unavailable');
       }
@@ -280,7 +413,18 @@ export function useRoute(route: RouteFn, vehicle?: VehicleProfile | null): Route
       clearTimeout(timer);
       controller.abort();
     };
-  }, [active, profile, preferences, waypoints, roundTrip, roundTripKm, roundTripDirection, seed]);
+  }, [
+    active,
+    profile,
+    preferences,
+    waypoints,
+    roundTrip,
+    roundTripKm,
+    roundTripDirection,
+    seed,
+    snapshot,
+    applySnapshot,
+  ]);
 
   // Trip time for *every* mode, for the picker's "🚗 24 min · 🚲 1 h 10" row.
   // The main effect above only routes the selected profile; this fills in the
@@ -291,7 +435,7 @@ export function useRoute(route: RouteFn, vehicle?: VehicleProfile | null): Route
   // Point-to-point only — a round trip's fixed-length loops aren't comparable
   // across modes, and transit is timed by its own board, not a costing.
   useEffect(() => {
-    if (!active || roundTrip || waypoints.length < 2) {
+    if (!active || roundTrip || waypoints.length < 2 || waypoints.some((w) => w.straightAfter)) {
       setModeTimes({});
       return;
     }
@@ -331,14 +475,17 @@ export function useRoute(route: RouteFn, vehicle?: VehicleProfile | null): Route
   const start = useCallback(
     (at?: LatLng, name?: string) => {
       setActive(true);
-      if (waypoints.length === 0) setMissingStart(false);
+      if (waypointsRef.current.length === 0) {
+        missingStartRef.current = false;
+        setMissingStart(false);
+      }
       // Only seeds an empty plan; re-opening the panel keeps the existing stops.
-      if (!at || waypoints.length > 0) return null;
+      if (!at || waypointsRef.current.length > 0) return null;
       const wp = nextWaypoint(at, name);
-      setWaypoints([wp]);
+      edit({ waypoints: [wp], missingStart: false });
       return wp.id;
     },
-    [waypoints.length, nextWaypoint],
+    [nextWaypoint, edit],
   );
 
   const restore = useCallback(
@@ -358,10 +505,16 @@ export function useRoute(route: RouteFn, vehicle?: VehicleProfile | null): Route
         setRoundTripKm(plan.roundTripKm!);
         setRoundTripDirection(plan.roundTripDirection ?? 'either');
       }
-      setWaypoints(plan.waypoints.map((w) => nextWaypoint(w.pos, w.name, w.transitStopId)));
-      setMissingStart(plan.missingStart === true && plan.waypoints.length === 1);
+      applySnapshot({
+        waypoints: plan.waypoints.map((w) => ({
+          ...nextWaypoint(w.pos, w.name, w.transitStopId),
+          ...(w.straightAfter ? { straightAfter: true } : {}),
+        })),
+        missingStart: plan.missingStart === true && plan.waypoints.length === 1,
+      });
+      resetHistory();
     },
-    [nextWaypoint],
+    [nextWaypoint, applySnapshot, resetHistory],
   );
 
   const plan = useMemo<StoredRoutePlan | null>(() => {
@@ -370,6 +523,7 @@ export function useRoute(route: RouteFn, vehicle?: VehicleProfile | null): Route
       pos: w.pos,
       ...(w.name === undefined ? {} : { name: w.name }),
       ...(w.transitStopId === undefined ? {} : { transitStopId: w.transitStopId }),
+      ...(w.straightAfter ? { straightAfter: true } : {}),
     }));
     const custom = preferencesByProfile[profile];
     const base =
@@ -405,13 +559,13 @@ export function useRoute(route: RouteFn, vehicle?: VehicleProfile | null): Route
 
   const stop = useCallback(() => {
     setActive(false);
-    setWaypoints([]);
-    setMissingStart(false);
+    applySnapshot({ waypoints: [], missingStart: false });
+    resetHistory();
     setRoundTripState(false);
     setRoundTripDirection('either');
     setPaths(null);
     setError(null);
-  }, []);
+  }, [applySnapshot, resetHistory]);
 
   // The waypoint is built outside the updater: allocating its id inside would
   // burn two ids per call under StrictMode's double-invoke, and the caller
@@ -419,13 +573,14 @@ export function useRoute(route: RouteFn, vehicle?: VehicleProfile | null): Route
   const addWaypoint = useCallback(
     (pos: LatLng, name?: string, transitStopId?: string) => {
       const wp = nextWaypoint(pos, name, transitStopId);
-      // Loops take stops like any other plan — they are places to ride past on
-      // the way round, and the route returns to the start regardless.
-      setWaypoints((wps) => (missingStart ? [wp, ...wps] : [...wps, wp]));
-      if (missingStart) setMissingStart(false);
+      const before = snapshot();
+      edit({
+        waypoints: before.missingStart ? [wp, ...before.waypoints] : [...before.waypoints, wp],
+        missingStart: false,
+      });
       return wp.id;
     },
-    [missingStart, nextWaypoint],
+    [nextWaypoint, snapshot, edit],
   );
 
   // Both halves of "route me there" in one commit, so neither reads the
@@ -434,88 +589,221 @@ export function useRoute(route: RouteFn, vehicle?: VehicleProfile | null): Route
     (pos: LatLng, name?: string, transitStopId?: string) => {
       const wp = nextWaypoint(pos, name, transitStopId);
       setRoundTripState(false);
-      setWaypoints((wps) => [...wps, wp]);
-      setMissingStart(waypoints.length === 0);
+      const before = snapshot();
+      edit({ waypoints: [...before.waypoints, wp], missingStart: before.waypoints.length === 0 });
       return wp.id;
     },
-    [nextWaypoint, waypoints.length],
+    [nextWaypoint, snapshot, edit],
   );
 
   const insertWaypoint = useCallback(
     (index: number, pos: LatLng, name?: string, transitStopId?: string) => {
       const wp = nextWaypoint(pos, name, transitStopId);
-      setWaypoints((wps) => [...wps.slice(0, index), wp, ...wps.slice(index)]);
-      if (index === 0) setMissingStart(false);
+      const before = snapshot();
+      const prior = before.waypoints[index - 1];
+      if (prior?.straightAfter) wp.straightAfter = true;
+      edit({
+        waypoints: [...before.waypoints.slice(0, index), wp, ...before.waypoints.slice(index)],
+        missingStart: index === 0 ? false : before.missingStart,
+      });
       return wp.id;
     },
-    [nextWaypoint],
+    [nextWaypoint, snapshot, edit],
   );
 
-  const moveWaypointTo = useCallback((id: number, pos: LatLng) => {
-    // Dragging a stop somewhere else invalidates whatever it was called.
-    setWaypoints((wps) => wps.map((w) => (w.id === id ? { id: w.id, pos } : w)));
-  }, []);
+  const moveWaypointTo = useCallback(
+    (id: number, pos: LatLng) => {
+      const before = snapshot();
+      if (!before.waypoints.some((w) => w.id === id)) return;
+      edit({
+        ...before,
+        waypoints: before.waypoints.map((w) =>
+          w.id === id ? { id: w.id, pos, ...(w.straightAfter ? { straightAfter: true } : {}) } : w,
+        ),
+      });
+    },
+    [snapshot, edit],
+  );
+
+  const previewWaypointMove = useCallback(
+    (id: number, pos: LatLng) => {
+      const before = snapshot();
+      if (!before.waypoints.some((w) => w.id === id)) return;
+      if (!dragOrigins.current.has(id)) dragOrigins.current.set(id, before);
+      setDragging(true);
+      applySnapshot({
+        ...before,
+        waypoints: before.waypoints.map((w) =>
+          w.id === id ? { id: w.id, pos, ...(w.straightAfter ? { straightAfter: true } : {}) } : w,
+        ),
+      });
+    },
+    [snapshot, applySnapshot],
+  );
+
+  const finishWaypointMove = useCallback(
+    (id: number, pos: LatLng) => {
+      const before = dragOrigins.current.get(id) ?? snapshot();
+      dragOrigins.current.delete(id);
+      setDragging(false);
+      const current = snapshot();
+      const origin = before.waypoints.find((w) => w.id === id);
+      if (!origin || (origin.pos.lat === pos.lat && origin.pos.lng === pos.lng)) {
+        applySnapshot(before);
+        return;
+      }
+      editHistory.current.past.push(before);
+      editHistory.current.future = [];
+      pendingSnap.current = { id, pos };
+      applySnapshot({
+        ...current,
+        waypoints: current.waypoints.map((w) =>
+          w.id === id ? { id: w.id, pos, ...(w.straightAfter ? { straightAfter: true } : {}) } : w,
+        ),
+      });
+      setHistoryVersion((version) => version + 1);
+    },
+    [snapshot, applySnapshot],
+  );
 
   const replaceWaypoint = useCallback(
     (id: number, pos: LatLng, name?: string, transitStopId?: string) => {
-      setWaypoints((wps) =>
-        wps.map((w) =>
+      const before = snapshot();
+      edit({
+        ...before,
+        waypoints: before.waypoints.map((w) =>
           w.id === id
             ? {
                 id: w.id,
                 pos,
+                ...(w.straightAfter ? { straightAfter: true } : {}),
                 ...(name === undefined ? {} : { name }),
                 ...(transitStopId === undefined ? {} : { transitStopId }),
               }
             : w,
         ),
-      );
+      });
     },
-    [],
+    [snapshot, edit],
   );
 
-  const nameWaypoint = useCallback((id: number, name: string, at: LatLng) => {
-    setWaypoints((wps) => {
-      const target = wps.find((w) => w.id === id);
+  const nameWaypoint = useCallback(
+    (id: number, name: string, at: LatLng) => {
+      const before = snapshot();
+      const target = before.waypoints.find((w) => w.id === id);
       // A lookup is in flight while the user keeps editing: the stop may have
       // been removed or dragged elsewhere, and the label would then describe
       // the wrong spot. Only apply it if the stop is still where it was asked
       // about, and still unnamed.
-      if (!target || target.name !== undefined) return wps;
-      if (target.pos.lat !== at.lat || target.pos.lng !== at.lng) return wps;
-      return wps.map((w) => (w.id === id ? { ...w, name } : w));
-    });
-  }, []);
+      if (!target || target.name !== undefined) return;
+      if (target.pos.lat !== at.lat || target.pos.lng !== at.lng) return;
+      applySnapshot({
+        ...before,
+        waypoints: before.waypoints.map((w) => (w.id === id ? { ...w, name } : w)),
+      });
+    },
+    [snapshot, applySnapshot],
+  );
 
-  const removeWaypoint = useCallback((id: number) => {
-    setWaypoints((wps) => wps.filter((w) => w.id !== id));
-  }, []);
+  const renameWaypoint = useCallback(
+    (id: number, name: string) => {
+      const before = snapshot();
+      if (!before.waypoints.some((w) => w.id === id)) return;
+      edit({
+        ...before,
+        waypoints: before.waypoints.map((w) =>
+          w.id === id ? { ...w, name: name.trim() || undefined } : w,
+        ),
+      });
+    },
+    [snapshot, edit],
+  );
 
-  const reorderWaypoint = useCallback((from: number, to: number) => {
-    setWaypoints((wps) => {
-      if (from === to || from < 0 || from >= wps.length || to < 0 || to >= wps.length) return wps;
+  const removeWaypoint = useCallback(
+    (id: number) => {
+      const before = snapshot();
+      if (!before.waypoints.some((w) => w.id === id)) return;
+      edit({ ...before, waypoints: before.waypoints.filter((w) => w.id !== id) });
+    },
+    [snapshot, edit],
+  );
+
+  const reorderWaypoint = useCallback(
+    (from: number, to: number) => {
+      const before = snapshot();
+      const wps = before.waypoints;
+      if (from === to || from < 0 || from >= wps.length || to < 0 || to >= wps.length) return;
       const next = [...wps];
       const [moved] = next.splice(from, 1);
       next.splice(to, 0, moved!);
-      return next;
-    });
-  }, []);
+      // Reordering changes which pair a leg mode connects; do not silently
+      // apply an old straight choice to a new pair of stops.
+      edit({ ...before, waypoints: next.map(({ straightAfter: _straightAfter, ...w }) => w) });
+    },
+    [snapshot, edit],
+  );
+
+  const setLegStraight = useCallback(
+    (id: number, straight: boolean) => {
+      if (roundTrip) return;
+      const before = snapshot();
+      const index = before.waypoints.findIndex((w) => w.id === id);
+      if (index < 0 || index >= before.waypoints.length - 1) return;
+      if (Boolean(before.waypoints[index]!.straightAfter) === straight) return;
+      edit({
+        ...before,
+        waypoints: before.waypoints.map((w) =>
+          w.id === id ? { ...w, straightAfter: straight || undefined } : w,
+        ),
+      });
+    },
+    [snapshot, edit, roundTrip],
+  );
+
+  const makeStart = useCallback(
+    (id: number) => {
+      const index = waypointsRef.current.findIndex((w) => w.id === id);
+      if (index > 0) reorderWaypoint(index, 0);
+    },
+    [reorderWaypoint],
+  );
+  const makeFinish = useCallback(
+    (id: number) => {
+      const index = waypointsRef.current.findIndex((w) => w.id === id);
+      if (index >= 0 && index < waypointsRef.current.length - 1)
+        reorderWaypoint(index, waypointsRef.current.length - 1);
+    },
+    [reorderWaypoint],
+  );
 
   const reverse = useCallback(() => {
-    setWaypoints((wps) => [...wps].reverse());
-  }, []);
+    const before = snapshot();
+    const reversed = [...before.waypoints].reverse().map((w, i, all) => ({
+      ...w,
+      straightAfter:
+        i < all.length - 1
+          ? before.waypoints[before.waypoints.length - 2 - i]?.straightAfter
+          : undefined,
+    }));
+    edit({ ...before, waypoints: reversed });
+  }, [snapshot, edit]);
 
   const clear = useCallback(() => {
-    setWaypoints([]);
-    setMissingStart(false);
-  }, []);
+    applySnapshot({ waypoints: [], missingStart: false });
+    resetHistory();
+  }, [applySnapshot, resetHistory]);
 
   const optimize = useCallback(() => {
-    setWaypoints((wps) => {
-      const order = optimizeWaypointOrder(wps.map((w) => w.pos));
-      return order.map((i) => wps[i]!);
+    const before = snapshot();
+    const order = optimizeWaypointOrder(before.waypoints.map((w) => w.pos));
+    edit({
+      ...before,
+      waypoints: order.map((i) => {
+        const { straightAfter: _straightAfter, ...w } = before.waypoints[i]!;
+        return w;
+      }),
     });
-  }, []);
+  }, [snapshot, edit]);
 
   // Loop mode is a change of *shape*, not a new plan: the stops entered so far
   // are kept and the route simply comes back to the start through them. It used
@@ -524,12 +812,18 @@ export function useRoute(route: RouteFn, vehicle?: VehicleProfile | null): Route
   // of the requested length instead.
   const setRoundTrip = useCallback((on: boolean) => {
     setRoundTripState(on);
-    if (on) setMissingStart(false);
+    if (on) {
+      missingStartRef.current = false;
+      setMissingStart(false);
+    }
   }, []);
 
   const newLoop = useCallback(() => {
     setSeed((s) => s + 1);
   }, []);
+
+  const canUndo = useMemo(() => editHistory.current.past.length > 0, [historyVersion]);
+  const canRedo = useMemo(() => editHistory.current.future.length > 0, [historyVersion]);
 
   return {
     active,
@@ -544,6 +838,7 @@ export function useRoute(route: RouteFn, vehicle?: VehicleProfile | null): Route
     selectedPath,
     loading,
     error,
+    offPathM,
     modeTimes,
     start,
     restore,
@@ -555,10 +850,21 @@ export function useRoute(route: RouteFn, vehicle?: VehicleProfile | null): Route
     addDestination,
     insertWaypoint,
     moveWaypointTo,
+    previewWaypointMove,
+    finishWaypointMove,
     replaceWaypoint,
     nameWaypoint,
+    renameWaypoint,
     removeWaypoint,
     reorderWaypoint,
+    setLegStraight,
+    makeStart,
+    makeFinish,
+    canUndo,
+    canRedo,
+    dragging,
+    undo,
+    redo,
     reverse,
     clear,
     optimize,

@@ -3,7 +3,7 @@ import { AtlasStorage, type TrackRecord } from '@atlas/storage';
 import { createNodeSqlDriver } from '@atlas/storage/node';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
-import { useGarmin } from './useGarmin.js';
+import { garminResendDevice, useGarmin } from './useGarmin.js';
 import type { SyncState } from './useSync.js';
 import type { UserData } from './useUserData.js';
 
@@ -268,6 +268,100 @@ it('manages Garmin courses and saves a copy into the course sport folder', async
   );
   expect(result.current.courses?.map((course) => course.id)).toEqual(['2']);
   expect(result.current.pendingCourseId).toBeNull();
+  await storage.close();
+});
+
+it('replaces an edited course: new course first, old one only after a confirm', async () => {
+  const storage = new AtlasStorage(createNodeSqlDriver());
+  await storage.init();
+  const calls: [string, unknown, unknown][] = [];
+  const accountRequest = vi.fn(async (path: string, body?: unknown, method?: string) => {
+    calls.push([path, body, method]);
+    if (path.endsWith('/status')) return { connected: true };
+    if (path === '/api/garmin/devices')
+      return {
+        devices: [
+          { id: '455', name: 'Edge' },
+          { id: '456', name: 'Fenix' },
+        ],
+      };
+    if (path === '/api/garmin/courses')
+      return {
+        courses: [
+          { id: '2', name: 'Lake', type: 'skating_ws', distanceM: 1, ascentM: 0, updated: 9 },
+        ],
+      };
+    if (path === '/api/garmin/courses/2/gpx') return { gpx: GPX };
+    if (path === '/api/garmin/courses/2/send') return { queued: true };
+    if (path === '/api/garmin/course') return { id: 77, url: 'u', queued: true };
+    if (path === '/api/garmin/courses/2' && method === 'DELETE') return { deleted: true };
+    throw new Error(`Unexpected ${path}`);
+  });
+  const sync = { email: 'edit@example.com', accountRequest } as unknown as SyncState;
+  const tracks = { current: [] as TrackRecord[] };
+  const data = fakeData(storage, tracks);
+  const { result, rerender } = renderHook(() => useGarmin(sync, data));
+  await waitFor(() => expect(result.current.connected).toBe(true));
+  await act(async () => {
+    await result.current.loadCourses();
+    await result.current.loadDevices();
+    await result.current.sendCourse('2', '456');
+  });
+  expect(garminResendDevice(result.current.deliveries.get('2'), result.current.devices)).toBe(
+    '456',
+  );
+  // Deliveries recorded before device ids were kept still find the watch by name.
+  expect(
+    garminResendDevice(
+      { deviceName: 'Fenix', queuedAt: 1, courseUpdated: null },
+      result.current.devices,
+    ),
+  ).toBe('456');
+
+  await act(async () => {
+    expect(await result.current.startCourseEdit('2')).toMatchObject({ id: '2', name: 'Lake' });
+  });
+  rerender();
+  const oldTrackId = result.current.courseEdit!.trackId;
+  const path = {
+    points: [
+      { lat: 59.9, lng: 10.7 },
+      { lat: 59.92, lng: 10.72 },
+    ],
+    distanceM: 2500,
+    timeMs: 1,
+    ascentM: 0,
+    descentM: 0,
+  };
+  await act(async () => {
+    expect(await result.current.replaceCourse(path, 'hike', '456')).toBe(true);
+  });
+  const upload = calls.find(([url]) => url === '/api/garmin/course')![1] as Record<string, string>;
+  expect(upload).toMatchObject({ name: 'Lake', profile: 'hike', sportOf: '2', deviceId: '456' });
+  expect(result.current.replacement).toEqual({
+    oldId: '2',
+    newId: '77',
+    name: 'Lake',
+    queuedTo: 'Fenix',
+  });
+  expect(result.current.courseEdit).toBeNull();
+  // Nothing was deleted on Garmin yet.
+  expect(calls.some(([, , method]) => method === 'DELETE')).toBe(false);
+  const all = await storage.listTracks();
+  const fresh = all.find((track) => track.tags.includes('garmin-course:77'))!;
+  const old = all.find((track) => track.id === oldTrackId)!;
+  expect(fresh.collectionId).toBe(old.collectionId);
+  expect(old).toMatchObject({ name: 'Lake (before edit)', tags: ['skating_ws'], visible: false });
+  rerender();
+  expect(result.current.savedCourses.get('77')).toBe(fresh.id);
+  expect(result.current.deliveries.get('77')).toMatchObject({ deviceId: '456' });
+
+  await act(async () => {
+    expect(await result.current.deleteReplacedCourse()).toBe(true);
+  });
+  expect(calls).toContainEqual(['/api/garmin/courses/2', undefined, 'DELETE']);
+  expect(result.current.replacement).toBeNull();
+  expect(result.current.deliveries.has('2')).toBe(false);
   await storage.close();
 });
 

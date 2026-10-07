@@ -54,6 +54,24 @@ describe('map hash', () => {
     expect(decodeMapHash(encodeMapHash(state))).toEqual(state);
   });
 
+  it('keeps direct legs in a shared plan', () => {
+    const state = {
+      center: { lat: 59.91, lng: 10.75 },
+      zoom: 12,
+      route: {
+        profile: 'hike',
+        points: [
+          { lat: 59.9, lng: 10.7 },
+          { lat: 59.91, lng: 10.71 },
+          { lat: 59.92, lng: 10.72 },
+        ],
+        directLegs: [1],
+      },
+    };
+    expect(encodeMapHash(state)).toContain('&direct=1');
+    expect(decodeMapHash(encodeMapHash(state))).toEqual(state);
+  });
+
   it('round-trips a round-trip plan', () => {
     const state = {
       center: { lat: 59.91, lng: 10.75 },

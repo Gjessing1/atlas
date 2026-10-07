@@ -47,6 +47,7 @@ export interface SyncApiOptions {
       profile: GarminProfile,
       gpx: string,
       deviceId?: string,
+      sportOf?: string,
     ): Promise<{ id: number; url: string; queued: boolean }>;
     courses(userId: string): Promise<GarminCourse[]>;
     courseGpx(userId: string, id: string): Promise<string>;
@@ -167,6 +168,8 @@ const GarminCourseSchema = Type.Object({
   ]),
   gpx: Type.String({ minLength: 20, maxLength: 4_000_000 }),
   deviceId: Type.Optional(Type.String({ pattern: '^\\d{1,20}$' })),
+  /** Garmin course whose sport the new course copies — set when replacing an edited course. */
+  sportOf: Type.Optional(Type.String({ pattern: '^\\d{1,20}$' })),
 });
 type GarminCourseBody = Static<typeof GarminCourseSchema>;
 const GarminActivitiesQuery = Type.Object({
@@ -485,6 +488,7 @@ export async function registerSyncApi(
             request.body.profile,
             request.body.gpx,
             request.body.deviceId,
+            request.body.sportOf,
           );
         } catch {
           return upstreamError(reply);
