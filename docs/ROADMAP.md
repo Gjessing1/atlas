@@ -468,6 +468,21 @@ Work done on the host or in the release pipeline rather than in the code.
       - Memory is the constraint there, not CPU: the Ally-X has 16 GB with ~7 GB free, so size
         `-Xmx`/threads from its health report, and refuse a Europe-scale area it cannot hold.
       - SOYO keeps the authoritative outputs; the worker's copy is disposable, like its AVDs.
+
+- [ ] **Run CI's build-and-test job on the Ally-X.** Every push spends ~50 min on SOYO's
+      4-core N150 (`npm ci`, `test:all` with the 16 min slow raster tests, image build), and the
+      load it causes is behind most local-AVD flakes. The Z1 Extreme should cut that to an
+      estimated ~15 min (unmeasured — time one run before committing to it). Shape:
+
+      - forgejo-runner + Docker inside WSL2 on the worker, under its own runner label.
+      - Split `.forgejo/workflows`: build, test and push the image to the Forgejo registry on the
+        worker; a small deploy job stays on SOYO (`docker compose up` must run here).
+      - Fallback is the hard part: Forgejo has no "prefer this runner", and the handheld may be
+        asleep, on battery or gaming. A push must still deploy when it is away, e.g. a SOYO job
+        that takes over when the worker's job has not started within a few minutes, or a health
+        check before the job is offered — never a push that stalls until the handheld wakes.
+      - Share the worker's health gate and one-session lock with the Android regression and the
+        tile-build `job` mode above, so CI, emulator and Planetiler never fight over its 16 GB.
       - Measure one Great Britain build on both hosts before switching the default.
       - Candidate after tiles: release APK builds (Gradle + clang, load ~16 on SOYO), which
         would need Node, the NDK and the signing keystore on the worker — weigh that secret's
