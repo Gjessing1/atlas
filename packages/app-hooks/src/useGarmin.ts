@@ -804,16 +804,18 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
       (await courseAction(id, async () => {
         const name = courses?.find((course) => course.id === id)?.name ?? 'Course';
         await request(`/api/garmin/courses/${id}`, undefined, 'DELETE');
+        // A failed local cache write cannot undo a successful Connect deletion.
+        await data.setSetting(`garmin.delivery.${id}`, '').catch(() => {});
         setCourses((list) => list?.filter((course) => course.id !== id) ?? null);
         setDeliveries((current) => {
           const next = new Map(current);
           next.delete(id);
           return next;
         });
-        setCourseNotice(`Deleted “${name}” from Garmin Connect.`);
+        setCourseNotice(`Deleted “${name}” from Garmin Connect. Remove any watch copy there too.`);
         return true;
       })) === true,
-    [courseAction, courses, request],
+    [courseAction, courses, data.setSetting, request],
   );
 
   const sendCourse = useCallback(
@@ -952,14 +954,16 @@ export function useGarmin<TFile>(sync: SyncState, data: UserData<TFile>): Garmin
     if (!done) return false;
     const deleted = await courseAction(done.oldId, async () => {
       await request(`/api/garmin/courses/${done.oldId}`, undefined, 'DELETE');
-      await data.setSetting(`garmin.delivery.${done.oldId}`, '');
+      await data.setSetting(`garmin.delivery.${done.oldId}`, '').catch(() => {});
       setDeliveries((current) => {
         const next = new Map(current);
         next.delete(done.oldId);
         return next;
       });
       setCourses((list) => list?.filter((course) => course.id !== done.oldId) ?? null);
-      setCourseNotice(`Deleted the old “${done.name}” from Garmin Connect.`);
+      setCourseNotice(
+        `Deleted the old “${done.name}” from Garmin Connect. Remove any watch copy there too.`,
+      );
       return true;
     });
     if (deleted) setReplacement(null);

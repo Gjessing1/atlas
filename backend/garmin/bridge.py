@@ -195,8 +195,9 @@ def main():
             # (ice skating, say) that no routing profile maps to.
             original = garmin.connectapi(
                 f"/course-service/course/{parse_course_id(command['sportOf'])}")
-            if isinstance(original.get("activityTypePk"), int):
-                activity_type = original["activityTypePk"]
+            if not isinstance(original.get("activityTypePk"), int):
+                raise BridgeInputError("Garmin did not return the original course sport")
+            activity_type = original["activityTypePk"]
         payload = course_payload(parsed, command["name"], activity_type)
         created = garmin.client.post("connect", "/course-service/course",
                                      json=payload, api=True)
@@ -206,12 +207,14 @@ def main():
         verified = garmin.connectapi(f"/course-service/course/{course_id}")
         if verified.get("courseName") != command["name"]:
             raise BridgeInputError("Garmin created a course but did not verify its name")
+        if command.get("sportOf") and verified.get("activityTypePk") != activity_type:
+            raise BridgeInputError("Garmin created a course but did not keep its sport")
         queued = False
         if command.get("deviceId"):
             try:
-                garmin.client.post(
+                when_ready(lambda: garmin.client.post(
                     "connect", "/device-service/devicemessage/messages",
-                    json=device_message(course_id, command["deviceId"], command["name"]))
+                    json=device_message(course_id, command["deviceId"], command["name"])))
                 queued = True
             except Exception:
                 # The course already exists; report that result even when Garmin
@@ -254,9 +257,10 @@ def main():
     elif action == "sendCourse":
         cid = parse_course_id(command["id"])
         course = garmin.connectapi(f"/course-service/course/{cid}")
-        garmin.client.post("connect", "/device-service/devicemessage/messages",
-                           json=device_message(cid, command.get("deviceId"),
-                                               course.get("courseName") or "Atlas course"))
+        when_ready(lambda: garmin.client.post(
+            "connect", "/device-service/devicemessage/messages",
+            json=device_message(cid, command.get("deviceId"),
+                                course.get("courseName") or "Atlas course")))
         answer({"queued": True})
     elif action == "devices":
         devices = garmin.get_devices()

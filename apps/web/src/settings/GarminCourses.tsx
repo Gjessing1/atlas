@@ -240,7 +240,8 @@ export function GarminCourses({
                     <div className="garmin-confirm" role="alertdialog" aria-label="Delete course">
                       <p>
                         Delete “{course.name}” from Garmin Connect? This can’t be undone.
-                        {savedTrack ? ' Your copy in Atlas stays.' : ''}
+                        {savedTrack ? ' Your copy in Atlas stays.' : ''} A copy already on your
+                        watch may stay there after sync. Remove it on the watch too.
                       </p>
                       <div className="garmin-action-row">
                         <button

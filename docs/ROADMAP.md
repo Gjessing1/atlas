@@ -71,16 +71,12 @@ dissolved into Routes & courses, Activities and Places. What remains:
 
 ### 1.3 Garmin — finish the round trip
 
-- [ ] **Verify course replacement against the live account.** v0.254.0's *Edit route → Update
-      on Garmin* is tested against mocks only: confirm on the real account that `sportOf` keeps
-      the sport (ice skating 168 included), that the new course queues to the watch, and that the
-      old one deletes after the post-create "not yet ready" window. Needs the user's approval for
-      writes to their account.
-- [ ] **Verify what a Connect-side delete or rename does on the watch itself.** The API calls
-      are verified (2026-10-04: list `/web-gateway/course/owner/`, GPX `/course-service/course/gpx/{id}`,
-      PUT and DELETE `/course-service/course/{id}`, which answers 429 "not yet ready" for ~10 s
-      after an edit); whether a watch drops or renames its copy on next sync is not. Check with
-      the user's watch and state the answer in the delete confirmation.
+Live replacement and EPIX sync checks shipped in v0.255.0: a replacement retained ice skating
+(type 168), queued to the EPIX and appeared there while the original-name copy remained. A
+disposable course's immediate delete hit Garmin's processing window and succeeded on retry. The
+EPIX kept the old course after its Connect entry was deleted and the watch synced, so confirmations tell
+users to remove the watch copy there. Details and limits: [ARCHITECTURE.md](./ARCHITECTURE.md).
+
 - [ ] **Courses on the watch, not just in Connect.** Garmin exposes no per-device course list
       we have found; the live Epix bridge returns its device entry, but its device-message list
       currently has only software updates. Atlas now remembers successful sends and flags later

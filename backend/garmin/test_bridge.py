@@ -173,6 +173,15 @@ class CourseActionTest(unittest.TestCase):
         self.assertEqual((message["metaDataId"], message["deviceId"], message["messageName"]),
                          (7, 123, "18k"))
 
+    def test_resending_waits_for_a_recently_edited_course(self):
+        client = Mock()
+        client.connectapi.return_value = {"courseName": "18k"}
+        client.client.post.side_effect = [Exception("429 - course not yet ready"), {}]
+        reply = self.call(client, {"action": "sendCourse", "id": "7", "deviceId": "123"})
+        self.assertEqual(reply, {"queued": True})
+        self.assertEqual(self.sleeps, [3])
+        self.assertEqual(client.client.post.call_count, 2)
+
     def test_a_replacement_upload_keeps_the_replaced_courses_sport(self):
         client = Mock()
         points = [{"latitude": 59.9, "longitude": 10.7, "elevation": 1},
@@ -184,13 +193,60 @@ class CourseActionTest(unittest.TestCase):
 
         def get(path):
             # The replaced course is ice skating, which no routing profile maps to.
-            return {"activityTypePk": 168} if path.endswith("/7") else {"courseName": "Lake"}
+            return ({"activityTypePk": 168} if path.endswith("/7") else
+                    {"courseName": "Lake", "activityTypePk": 168})
         client.connectapi.side_effect = get
         reply = self.call(client, {"action": "uploadCourse", "name": "Lake", "profile": "hike",
                                    "gpx": "<gpx/>", "sportOf": "7"})
         self.assertEqual(reply["id"], 99)
         created = client.client.post.call_args_list[1].kwargs["json"]
         self.assertEqual(created["activityTypePk"], 168)
+
+    def test_a_replacement_refuses_to_guess_a_missing_original_sport(self):
+        client = Mock()
+        client.client.post.return_value = {"geoPoints": [
+            {"latitude": 59.9, "longitude": 10.7},
+            {"latitude": 59.91, "longitude": 10.71}]}
+        client.connectapi.return_value = {"courseId": 7}
+        reply = self.call(client, {"action": "uploadCourse", "name": "Lake", "profile": "hike",
+                                   "gpx": "<gpx/>", "sportOf": "7"})
+        self.assertEqual(reply, {"error": "Garmin did not return the original course sport"})
+        self.assertEqual(client.client.post.call_count, 1)
+
+    def test_a_replacement_reports_a_sport_garmin_changed(self):
+        client = Mock()
+        points = [{"latitude": 59.9, "longitude": 10.7},
+                  {"latitude": 59.91, "longitude": 10.71}]
+        client.client.post.side_effect = [{"geoPoints": points}, {"courseId": 99}]
+        client.connectapi.side_effect = [{"activityTypePk": 168},
+                                         {"courseName": "Lake", "activityTypePk": 3}]
+        reply = self.call(client, {"action": "uploadCourse", "name": "Lake", "profile": "hike",
+                                   "gpx": "<gpx/>", "sportOf": "7"})
+        self.assertEqual(reply, {"error": "Garmin created a course but did not keep its sport"})
+        client.client.post.assert_any_call("connect", "/course-service/course", json=unittest.mock.ANY,
+                                           api=True)
+
+    def test_a_new_course_waits_until_garmin_can_queue_it(self):
+        client = Mock()
+        points = [{"latitude": 59.9, "longitude": 10.7},
+                  {"latitude": 59.91, "longitude": 10.71}]
+
+        def post(_service, path, **_kwargs):
+            if path.endswith("/import"):
+                return {"geoPoints": points}
+            if path.endswith("/course"):
+                return {"courseId": 99}
+            if client.client.post.call_count == 3:
+                raise Exception("429 - course not yet ready")
+            return {}
+
+        client.client.post.side_effect = post
+        client.connectapi.return_value = {"courseName": "Lake"}
+        reply = self.call(client, {"action": "uploadCourse", "name": "Lake", "profile": "hike",
+                                   "gpx": "<gpx/>", "deviceId": "123"})
+        self.assertEqual(reply["queued"], True)
+        self.assertEqual(self.sleeps, [3])
+        self.assertEqual(client.client.post.call_count, 4)
 
     def test_a_replacement_refuses_a_bad_source_course(self):
         client = Mock()

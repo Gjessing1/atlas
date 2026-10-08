@@ -30,7 +30,8 @@ export function GarminCourseEditBar({
     <View style={styles.box} testID="garmin-course-edit">
       <Text style={styles.text}>
         Editing Garmin course <Text style={styles.strong}>“{edit.name}”</Text>. Reshape it on the
-        map, then update it on Garmin.
+        map, then create a replacement in Garmin Connect. The old course stays until you choose to
+        delete it.
       </Text>
       {garmin.devices.length > 0 ? (
         <View style={styles.row}>
@@ -55,7 +56,9 @@ export function GarminCourseEditBar({
           accessibilityRole="button"
           testID="garmin-course-update"
         >
-          <Text style={styles.buttonText}>{pending ? 'Updating…' : 'Update on Garmin'}</Text>
+          <Text style={styles.buttonText}>
+            {pending ? 'Creating…' : 'Create replacement on Garmin'}
+          </Text>
         </Pressable>
         <Pressable
           style={[styles.button, styles.quiet]}
@@ -96,10 +99,10 @@ export function GarminReplaceConfirm({ garmin }: { garmin: GarminState }) {
   return (
     <View style={[styles.box, styles.confirm]} testID="garmin-replace-confirm">
       <Text style={styles.text}>
-        “{done.name}” is updated on Garmin
-        {done.queuedTo ? ` and queued for ${done.queuedTo}` : ''}. Delete the old version from
-        Garmin Connect? Your watch may keep its old copy until you remove it there — Atlas has not
-        verified what a watch does on its next sync.
+        A replacement for “{done.name}” was created in Garmin Connect
+        {done.queuedTo ? ` and queued for ${done.queuedTo}` : ''}. Delete the old Connect course? A
+        copy already on your watch may stay there after sync. Remove the old course on the watch
+        too.
       </Text>
       <View style={styles.row}>
         <Pressable

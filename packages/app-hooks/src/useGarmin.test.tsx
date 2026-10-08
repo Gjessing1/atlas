@@ -189,7 +189,8 @@ it('manages Garmin courses and saves a copy into the course sport folder', async
         ],
       };
     if (path === '/api/garmin/courses/2/gpx') return { gpx: GPX };
-    if (path === '/api/garmin/courses/1' && method === 'DELETE') return { deleted: true };
+    if (['/api/garmin/courses/1', '/api/garmin/courses/2'].includes(path) && method === 'DELETE')
+      return { deleted: true };
     if (path === '/api/garmin/courses/2' && method === 'PATCH') return { updated: true };
     if (path === '/api/garmin/courses/2/send') return { queued: true };
     throw new Error(`Unexpected ${path}`);
@@ -253,7 +254,9 @@ it('manages Garmin courses and saves a copy into the course sport folder', async
     expect(await result.current.deleteCourse('1')).toBe(true);
   });
   expect(result.current.courses?.map((course) => course.id)).toEqual(['2']);
-  expect(result.current.courseNotice).toBe('Deleted “Old loop” from Garmin Connect.');
+  expect(result.current.courseNotice).toBe(
+    'Deleted “Old loop” from Garmin Connect. Remove any watch copy there too.',
+  );
   // Deleting on Garmin never touches the Atlas copy.
   expect(await storage.listTracks()).toHaveLength(1);
 
@@ -268,6 +271,10 @@ it('manages Garmin courses and saves a copy into the course sport folder', async
   );
   expect(result.current.courses?.map((course) => course.id)).toEqual(['2']);
   expect(result.current.pendingCourseId).toBeNull();
+  await act(async () => {
+    expect(await result.current.deleteCourse('2')).toBe(true);
+  });
+  expect(await data.getSetting('garmin.delivery.2')).toBe('');
   await storage.close();
 });
 

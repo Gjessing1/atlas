@@ -244,11 +244,14 @@ test('manages Garmin courses: filter, save to Atlas, rename, sport, send and del
   await courses.getByRole('button', { name: 'Delete…' }).click();
   const confirm = courses.getByRole('alertdialog', { name: 'Delete course' });
   await expect(confirm).toContainText('Your copy in Atlas stays.');
+  await expect(confirm).toContainText('Remove it on the watch too.');
   await confirm.getByRole('button', { name: 'Keep' }).click();
   expect(deleted).toEqual([]);
   await courses.getByRole('button', { name: 'Delete…' }).click();
   await confirm.getByRole('button', { name: 'Delete', exact: true }).click();
-  await expect(courses.getByRole('status')).toHaveText('Deleted “Ridge 18k” from Garmin Connect.');
+  await expect(courses.getByRole('status')).toHaveText(
+    'Deleted “Ridge 18k” from Garmin Connect. Remove any watch copy there too.',
+  );
   await expect(courses.getByRole('button', { name: /Ridge 18k/ })).toHaveCount(0);
   expect(deleted).toEqual(['7']);
 });
@@ -340,14 +343,17 @@ test('edits a Garmin course in the planner and replaces it on Garmin', async ({ 
   await expect(page.locator('.route-waypoint-marker')).toHaveCount(3);
   await expect(page.locator('.route-stats')).toBeVisible();
 
-  await bar.getByRole('button', { name: 'Update on Garmin' }).click();
+  await bar.getByRole('button', { name: 'Create replacement on Garmin' }).click();
   const confirm = planner.getByRole('alertdialog', { name: 'Replace Garmin course' });
-  await expect(confirm).toContainText('“Lake loop” is updated on Garmin and queued for Forerunner');
+  await expect(confirm).toContainText(
+    'A replacement for “Lake loop” was created in Garmin Connect and queued for Forerunner',
+  );
+  await expect(confirm).toContainText('Remove the old course on the watch too.');
   expect(created).toMatchObject({ name: 'Lake loop', sportOf: '8', deviceId: '456' });
   expect(deleted).toEqual([]);
   await confirm.getByRole('button', { name: 'Delete old version' }).click();
   await expect(planner.getByRole('status').filter({ hasText: 'Deleted the old' })).toHaveText(
-    'Deleted the old “Lake loop” from Garmin Connect.',
+    'Deleted the old “Lake loop” from Garmin Connect. Remove any watch copy there too.',
   );
   expect(deleted).toEqual(['8']);
   await expect(bar).toHaveCount(0);
