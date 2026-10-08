@@ -276,6 +276,12 @@ before that destination. Also:
   invisible here. Rasters, fills, circles and ordinary React Native views render and screenshot
   normally, so verify a symbol layer on a real device or through a temporary `circle` layer on
   the same source.
+- **MapLibre ViewAnnotations are visible in screenshots but absent from UiAutomator's tree.** The
+  v0.255.0 release candidate showed its route point and line correctly, yet neither
+  `route-map-point-*` testID appeared in the worker's window dump. Do not wait for or tap those IDs
+  in `regression.mjs`. The device regression checks a map tap, point-list actions and undo; the
+  web `planner.spec.ts` checks line insertion and dragging until an Android driver can locate
+  native annotations without UiAutomator.
 - **Check the clock.** A restored snapshot has come back 17 hours behind, which breaks every
   countdown and "N min ago". Compare `adb shell date` with the host's before judging anything with
   a time in it.
