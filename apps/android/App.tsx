@@ -120,7 +120,6 @@ import { useLightning } from './src/layers/useLightning';
 import { useSatellites } from './src/layers/useSatellites';
 import { useSpeedCameras } from './src/layers/useSpeedCameras';
 import { useTraffic } from './src/layers/useTraffic';
-import { useTrafficFlow } from './src/layers/useTrafficFlow';
 import { useRoadWeather } from './src/layers/useRoadWeather';
 import { useWeatherLayers, useWeatherWarnings } from './src/layers/useWeatherLayers';
 import { useTransitVehicles } from './src/layers/useTransitVehicles';
@@ -792,7 +791,6 @@ function AppInner() {
   // is only the drawn layer.
   const speedCameras = useSpeedCameras(overlays, serverOrigin);
   const traffic = useTraffic(overlays, serverOrigin);
-  const trafficFlow = useTrafficFlow(overlays, serverOrigin);
   const roadWeather = useRoadWeather(overlays, serverOrigin);
   // Weather layers: a field's timeline, grid labels and the dock that appears
   // while one is on, plus MET's warnings — the same catalog rows as the web.
@@ -1673,7 +1671,6 @@ function AppInner() {
         starlink={starlink}
         speedCameras={speedCameras}
         traffic={traffic}
-        trafficFlow={trafficFlow}
         roadWeather={roadWeather}
         transitVehicles={transitVehicles}
         weather={weatherLayers}

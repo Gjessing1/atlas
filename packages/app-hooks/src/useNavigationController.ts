@@ -70,12 +70,7 @@ import {
   type RoutingProfile,
   type ValhallaTransport,
 } from '@atlas/routing';
-import {
-  applyTrafficDelay,
-  type TrafficClosureTransport,
-  type TrafficDelayTransport,
-  type RoadWeatherTransport,
-} from '@atlas/traffic';
+import { type TrafficClosureTransport, type RoadWeatherTransport } from '@atlas/traffic';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 /**
@@ -120,14 +115,6 @@ export interface NavPlatform {
   nvdbCameras?: NvdbCameraTransport;
   /** Live route-matched DATEX closures, for proactive mid-drive rerouting. */
   trafficClosures?: TrafficClosureTransport;
-  /**
-   * Live corridor travel times matched onto a route, for re-pricing the trip
-   * being driven. Optional and best-effort in exactly the way the other
-   * traffic seam is: without it the trip keeps the schedule it departed with,
-   * which is the pre-v0.136.0 behaviour and the behaviour everywhere the feed
-   * has nothing to say.
-   */
-  trafficDelay?: TrafficDelayTransport;
   /** Live measured/forecast road-surface conditions matched to a driving route. */
   roadWeather?: RoadWeatherTransport;
   /**
@@ -1054,56 +1041,6 @@ export function useNavigationController(platform: NavPlatform): NavController {
     [lifecycleRef, dispatch, reroute],
   );
 
-  /**
-   * Re-price the route being driven against the newest corridor measurements.
-   *
-   * The correction used to be applied only when a route was *built*, so a jam
-   * that formed after departure reached the driver at the next reroute or not
-   * at all — on a motorway with no turns left, "not at all" was the usual
-   * answer. The roads do not change here and the trip does not restart: only
-   * the maneuver schedule is replaced, which the session now accepts in place
-   * (`setSchedule`), so prompts already fired, the banked distance and the
-   * section-control anchor all survive.
-   *
-   * Deliberately re-priced over the *whole* line rather than the part ahead:
-   * the schedule already sheds a delay as its maneuvers are passed, and asking
-   * only about the remainder would make the same jam count twice for anything
-   * reading the path's own total.
-   */
-  const repriceTraffic = useCallback(async (): Promise<void> => {
-    const before = lifecycleRef.current;
-    const session = sessionRef.current;
-    const delays = platformRef.current.trafficDelay;
-    // Car only: the corridors measure motor traffic, and it is the only
-    // profile whose provider prices a route in the first place.
-    if (!session || before.stage.kind !== 'guiding' || !delays || before.profile !== 'car') return;
-    const { trip } = before;
-    const { path } = before.stage;
-    let priced: RoutePath;
-    try {
-      priced = applyTrafficDelay(path, await delays(path.points));
-    } catch {
-      // Offline, or the feed is down: the trip keeps the schedule it has.
-      return;
-    }
-    // A reroute (or End) during the request leaves this measurement describing
-    // a line nobody is driving any more.
-    const live = lifecycleRef.current;
-    if (live.trip !== trip || sessionRef.current !== session) return;
-    if (live.stage.kind !== 'guiding' || live.stage.path !== path) return;
-    if (priced.timeMs === path.timeMs) return;
-    const refreshed = session.setSchedule(priced, Date.now());
-    // Same roads, new schedule: logged as its own event so it can never be
-    // mistaken for a reroute, which is what the identical-geometry
-    // `active-route` lines in the uploaded log looked like.
-    diag({ event: 'route-repriced', deltaMs: priced.timeMs - path.timeMs });
-    dispatch({ type: 'path-repriced', path: priced });
-    if (refreshed) {
-      setState(refreshed);
-      lastStateRef.current = refreshed;
-    }
-  }, [lifecycleRef, dispatch, platformRef, diag]);
-
   /** Refresh ice risk without changing or restarting the route being driven. */
   const refreshRoadWeather = useCallback(async (): Promise<void> => {
     const before = lifecycleRef.current;
@@ -1166,14 +1103,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
           );
           closureAhead = (await closureTransport(currentPath.points.slice(fromIndex))).length > 0;
         }
-        // Before comparing anything: bring the followed route's schedule up to
-        // the current measurements. It is the point of the poll in its own right
-        // — the ETA moves without the driver doing anything — and it is what
-        // makes the comparison below fair, since the candidate is priced by the
-        // provider against *now* while the followed route was priced at
-        // departure. Judging one against the other was measuring a jam that has
-        // since cleared against one that has not.
-        await Promise.all([repriceTraffic(), refreshRoadWeather()]);
+        await refreshRoadWeather();
         if (lifecycleRef.current.trip !== trip || !sessionRef.current) return;
         const plannedMs = session.plannedRemainingMs();
         const plannedM = lastStateRef.current?.distanceRemainingM ?? state.distanceRemainingM;
@@ -1269,16 +1199,7 @@ export function useNavigationController(platform: NavPlatform): NavController {
         if (lifecycleRef.current.trip === trip) dispatch({ type: 'faster-probe-settled' });
       }
     },
-    [
-      lifecycleRef,
-      dispatch,
-      platformRef,
-      fetchChoices,
-      speak,
-      repriceTraffic,
-      refreshRoadWeather,
-      diag,
-    ],
+    [lifecycleRef, dispatch, platformRef, fetchChoices, speak, refreshRoadWeather, diag],
   );
 
   /** Install a route the driver picked from a line already visible on the map. */

@@ -2486,13 +2486,6 @@ button {
   }
 }
 
-/* Measured congestion already inside the ETA — coloured because it is the one
-   part of that number the road, not the router, decided. */
-.route-traffic-delay {
-  color: var(--warning);
-  font-weight: 600;
-}
-
 .route-weather-warning,
 .nav-preview-weather,
 .nav-road-weather {
@@ -5011,18 +5004,6 @@ button.transit-notice-summary {
   color: var(--text-muted);
   font-size: 13px;
   font-weight: 600;
-}
-
-/* Traffic still ahead, in the same warning colour the planner uses for it —
-   the one part of the ETA the road decided rather than the router. Last in the
-   row and never allowed to squeeze the clock. */
-.nav-traffic-delay {
-  flex: 0 0 auto;
-  margin-left: auto;
-  color: var(--warning);
-  font-size: 13px;
-  font-weight: 700;
-  white-space: nowrap;
 }
 
 /* No bar behind the controls — each one is its own floating chip, so the map

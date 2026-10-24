@@ -6,7 +6,7 @@ import {
 } from '@atlas/app-hooks';
 import { headingRateDegPerSec, type Position } from '@atlas/navigation';
 import { enrichPlannedResult, httpElevationProfile } from '@atlas/routing';
-import { httpRoadWeather, httpTrafficClosures, httpTrafficDelay } from '@atlas/traffic';
+import { httpRoadWeather, httpTrafficClosures } from '@atlas/traffic';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as Location from 'expo-location';
 import { DeviceMotion } from 'expo-sensors';
@@ -278,9 +278,6 @@ export function useNavigation(): NavController {
       },
       diagnostics: navigationDiagnosticsSink,
       trafficClosures: httpTrafficClosures(serverOrigin),
-      // The same corridor measurements the provider prices a new route with,
-      // asked again mid-drive so the trip being followed is re-priced too.
-      trafficDelay: httpTrafficDelay(serverOrigin),
       roadWeather: httpRoadWeather(serverOrigin),
       trace,
       // NVDB speed limits + ATK/OSM cameras, offline-first: a

@@ -50,15 +50,6 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     route: { file: 'backend/src/traffic-api.ts', contains: "'/api/overlay/traffic/features'" },
   },
   {
-    id: 'map-traffic-flow',
-    surface: 'map',
-    capability: 'See how the measured road corridors are running, and tap one for its travel time',
-    web: { file: 'apps/web/src/map/useTrafficFlowLayer.ts', contains: 'useTrafficFlowLayer' },
-    android: { file: 'apps/android/src/layers/useTrafficFlow.ts', contains: 'useTrafficFlow' },
-    route: { file: 'backend/src/traffic-api.ts', contains: "'/api/overlay/traffic-flow/features'" },
-    note: 'Both draw the same server-classified colours (`@atlas/traffic` owns the levels) and both offset the line right of the direction of travel, because every corridor has a reverse twin over the same road. Off by default on both: the ETA already carries the measurement, so this layer answers "why", which is a question you ask rather than one you want asked for you.',
-  },
-  {
     id: 'map-road-weather',
     surface: 'map',
     capability: 'See and identify measured road temperature, condition and ice risk',
@@ -1088,33 +1079,6 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     hook: 'useNavigationController',
     web: { file: 'apps/web/src/nav/useWebNavigation.ts', contains: 'trafficClosures' },
     android: { file: 'apps/android/src/nav/useNavigation.ts', contains: 'trafficClosures' },
-  },
-  {
-    id: 'nav-traffic-eta',
-    surface: 'navigation',
-    capability: 'Include measured congestion in the ETA, and say how much of it is traffic',
-    web: { file: 'apps/web/src/routing/RoutePanel.tsx', contains: 'formatTrafficDelay' },
-    android: { file: 'apps/android/src/ui/RoutePanel.tsx', contains: 'formatTrafficDelay' },
-    // The route is the capability, not a detail of it: without it every client
-    // shows the engine's own schedule and nothing anywhere looks broken.
-    route: { file: 'backend/src/traffic-api.ts', contains: "'/api/traffic/travel-times'" },
-    note: 'Both clients wrap their provider in `trafficAwareRouteProvider(…, httpTrafficDelay())`, so the correction lands in `RoutePath.timeMs` before any UI sees it and the shared `formatTrafficDelay` is the only wording. Norway-only by data: outside NPRA’s 202 measured corridors nothing is added and no client says anything.',
-  },
-  {
-    id: 'nav-traffic-live',
-    surface: 'navigation',
-    capability: 'Re-price the running trip as traffic changes, naming the delay still ahead',
-    hook: 'useNavigationController',
-    web: {
-      file: 'apps/web/src/nav/NavBanner.tsx',
-      contains: 'formatTrafficDelay(state.trafficDelayMs)',
-    },
-    android: {
-      file: 'apps/android/src/nav/NavBanner.tsx',
-      contains: 'formatTrafficDelay(state.trafficDelayMs)',
-    },
-    route: { file: 'backend/src/traffic-api.ts', contains: "'/api/traffic/travel-times'" },
-    note: 'Both clients pass the same `httpTrafficDelay` transport as `NavPlatform.trafficDelay`; the shared controller re-prices on the 3-minute watch and `NavigationSession.setSchedule` swaps the maneuver schedule without restarting the trip. The banner shows only the traffic still *ahead*, so it falls away as the queue is driven through.',
   },
   {
     id: 'nav-road-weather',

@@ -36,7 +36,7 @@ import {
 } from '@atlas/routing';
 import type { CollectionRecord, PlaceRecord } from '@atlas/storage';
 import type { TransitTrip } from '@atlas/transit';
-import { formatRoadWeatherWarning, formatTrafficDelay } from '@atlas/traffic';
+import { formatRoadWeatherWarning } from '@atlas/traffic';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useBottomSheet } from '../BottomSheet.js';
 import {
@@ -989,15 +989,6 @@ export function RoutePanel({
                     <strong className="route-summary-time">{fmtDuration(path.timeMs)}</strong>
                     <span className="route-summary-detail">
                       {fmtKm(path.distanceM)} · ETA {fmtEta(path.timeMs)}
-                      {/* The measured part of that time, named rather than
-                          silently folded in — an ETA that moved for a reason
-                          should say so. */}
-                      {formatTrafficDelay(path.trafficDelayMs) && (
-                        <span className="route-traffic-delay">
-                          {' '}
-                          · {formatTrafficDelay(path.trafficDelayMs)}
-                        </span>
-                      )}
                     </span>
                     {/* Climb gets its own line rather than a fourth clause on
                         the one above: with Start beside it the detail line has

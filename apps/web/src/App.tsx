@@ -121,7 +121,6 @@ import { useSatellitesLayer } from './map/useSatellitesLayer.js';
 import { useExploreLayer } from './map/useExploreLayer.js';
 import { usePoiLayer } from './map/usePoiLayer.js';
 import { useSpeedCameraLayer } from './map/useSpeedCameraLayer.js';
-import { useTrafficFlowLayer } from './map/useTrafficFlowLayer.js';
 import { useTrafficLayer } from './map/useTrafficLayer.js';
 import { useRoadWeatherLayer } from './map/useRoadWeatherLayer.js';
 import {
@@ -551,7 +550,6 @@ export function App() {
   useSpotLayer(map, bestSpots.spots, onPickSpot, blockPassiveClicksRef);
   // The drive profile's signature overlay: ATK speed cameras as map features.
   useSpeedCameraLayer(map, overlays);
-  useTrafficFlowLayer(map, overlays);
   useTrafficLayer(map, overlays);
   useRoadWeatherLayer(map, overlays);
   useTransitVehicleLayer(map, overlays, mapViewport);

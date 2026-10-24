@@ -52,7 +52,6 @@ function state(overrides: Partial<NavState> = {}): NavState {
     distanceRemainingM: 4321.8765,
     timeRemainingMs: 300_000,
     etaEpochMs: 1_700_000_000_000,
-    trafficDelayMs: 0,
     upcoming: {
       instruction: instruction('Turn right onto Storgata', [0, 1]),
       index: 4,

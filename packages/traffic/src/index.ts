@@ -6,23 +6,6 @@ export {
   type TrafficSituation,
 } from './datex.js';
 export {
-  applyTrafficDelay,
-  formatTrafficDelay,
-  trafficDelayForRoute,
-  type TrafficDelay,
-  type TrafficDelaySegment,
-} from './delay.js';
-export {
-  corridorFlow,
-  tappedFlowProperties,
-  trafficFlowFeatureCollection,
-  type TrafficFlowFeatureCollection,
-  type TrafficFlowHit,
-  type TrafficFlowLevel,
-  type TrafficFlowProperties,
-  type TrafficFlowReading,
-} from './flow.js';
-export {
   closuresNearRoute,
   distanceToTrafficRouteM,
   trafficFeatureCollection,
@@ -31,21 +14,11 @@ export {
 } from './model.js';
 export {
   httpTrafficClosures,
-  httpTrafficDelay,
   httpRoadWeather,
   trafficAwareRouteProvider,
   type TrafficClosureTransport,
-  type TrafficDelayTransport,
   type RoadWeatherTransport,
 } from './routing.js';
-export {
-  parseTravelTimeCorridors,
-  parseTravelTimeSnapshot,
-  type TravelTimeCorridor,
-  type TravelTimeMeasurement,
-  type TravelTimeSnapshot,
-  type TravelTimeStatus,
-} from './traveltime.js';
 export {
   formatRoadWeatherWarning,
   parseForecastRoadWeather,

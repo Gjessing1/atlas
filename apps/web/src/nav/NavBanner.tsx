@@ -18,7 +18,7 @@ import {
   tunnelChipLabel,
 } from '@atlas/navigation';
 import { formatExitSign, ROUTING_PROFILES, type RouteLane } from '@atlas/routing';
-import { formatRoadWeatherWarning, formatTrafficDelay } from '@atlas/traffic';
+import { formatRoadWeatherWarning } from '@atlas/traffic';
 import { TurnIcon } from './TurnIcon.js';
 
 /** Ground speed in km/h, or null when stationary/unknown. */
@@ -409,15 +409,6 @@ export function NavBanner({
                 <span className="nav-summary">
                   {fmtClock(state.etaEpochMs)} arrival · {fmtKm(state.distanceRemainingM)}
                 </span>
-                {/* The measured part of the time above — only ever the traffic
-                    still ahead, so it disappears as the queue is driven
-                    through, and it explains an ETA that moved without the
-                    driver doing anything. */}
-                {formatTrafficDelay(state.trafficDelayMs) ? (
-                  <span className="nav-traffic-delay">
-                    {formatTrafficDelay(state.trafficDelayMs)}
-                  </span>
-                ) : null}
               </div>
               <div className="nav-progress-track" aria-hidden="true">
                 <div

@@ -11,7 +11,7 @@ import {
   type ElevationPoint,
 } from '@atlas/navigation';
 import { formatExitSign, ROUTING_PROFILES, type RouteLane } from '@atlas/routing';
-import { formatRoadWeatherWarning, formatTrafficDelay } from '@atlas/traffic';
+import { formatRoadWeatherWarning } from '@atlas/traffic';
 import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
@@ -513,15 +513,6 @@ export function NavBanner({
                   </Text>
                 </>
               )}
-              {/* The measured part of the time beside it — only ever the
-                  traffic still ahead, so it disappears as the queue is driven
-                  through, and it explains an ETA that moved without the driver
-                  doing anything. */}
-              {formatTrafficDelay(state.trafficDelayMs) ? (
-                <Text style={styles.trafficDelay} numberOfLines={1}>
-                  {formatTrafficDelay(state.trafficDelayMs)}
-                </Text>
-              ) : null}
             </View>
             <View style={[styles.progressTrack, landscape && styles.progressTrackCompact]}>
               <View
@@ -824,16 +815,6 @@ const styles = StyleSheet.create({
   etaInline: { color: theme.text, fontSize: 15, fontWeight: '800' },
   eta: { flexShrink: 0, color: theme.text, fontSize: 19, fontWeight: '800', lineHeight: 22 },
   summary: { flexShrink: 1, color: theme.textMuted, fontSize: 13, fontWeight: '600' },
-  // Warning-coloured, like the planner's: the part of the ETA the road decided
-  // rather than the router. Pushed to the end of the row and never shrunk —
-  // "+12 min traffic" clipped to "+12 min" would read as the time remaining.
-  trafficDelay: {
-    flexShrink: 0,
-    marginLeft: 'auto',
-    color: theme.warning,
-    fontSize: 13,
-    fontWeight: '700',
-  },
   roadWeather: {
     color: theme.warning,
     fontSize: 12,

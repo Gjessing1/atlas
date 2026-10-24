@@ -79,11 +79,10 @@ export interface UpcomingManeuver {
   instruction: RouteInstruction;
   /**
    * Position of this maneuver in the route's own instruction list. The
-   * instruction *objects* are not stable — re-pricing a trip mid-drive
-   * replaces every one of them ({@link NavigationSession.setSchedule}) — so
-   * anything that needs to say *which* maneuver this is across time (voice
-   * prompts, the diagnostic log's per-fix records) must carry the index
-   * rather than compare references.
+   * instruction *objects* are not stable — late NVDB lane rows replace them
+   * ({@link NavigationSession.setLanes}) — so anything that needs to say
+   * *which* maneuver this is across time (voice prompts, the diagnostic log's
+   * per-fix records) must carry the index rather than compare references.
    */
   index: number;
   /** Distance (m) from the current snapped position to the maneuver point. */
@@ -137,14 +136,6 @@ export interface NavState {
   timeRemainingMs: number;
   /** Absolute arrival time estimate (epoch ms). */
   etaEpochMs: number;
-  /**
-   * How much of `timeRemainingMs` is measured congestion rather than the
-   * engine's own schedule — the traffic still *ahead*, so it falls away as the
-   * jam is driven through and reaches zero on a clear road. 0 wherever nothing
-   * is measured, which is the normal case outside Norway's corridors and
-   * everywhere without a live feed.
-   */
-  trafficDelayMs: number;
   /** The next maneuver, or null once past the final turn. */
   upcoming: UpcomingManeuver | null;
   /** The maneuver after `upcoming` (for "then …" hints), or null. */

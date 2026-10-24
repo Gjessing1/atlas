@@ -417,7 +417,6 @@ describe('nav lifecycle — results that belong to a trip that has moved on', ()
           atMs: 0,
         },
       },
-      { type: 'path-repriced', path: path(500_000) },
       { type: 'pause', atMs: 0, traveledM: 0 },
       { type: 'arrived', atMs: 0, traveledM: 0 },
       { type: 'continue-began', atMs: 0 },

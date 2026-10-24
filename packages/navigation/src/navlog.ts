@@ -376,6 +376,8 @@ function applyRecord(trip: TripBuilder, parsed: NavDiagnosticRecord, atMs: numbe
       );
       return;
     }
+    // Only builds before the NPRA travel-time removal write this, but uploaded
+    // logs are kept for 90 days and a report on one of them must still read.
     case 'route-repriced': {
       const delta = num(parsed.deltaMs);
       trip.add(

@@ -208,6 +208,13 @@ each API actually returns in [DATA-SOURCES.md](./DATA-SOURCES.md) once probed.
       CCTV publications that nothing uses yet (DATA-SOURCES.md → *Corridor travel times*): show
       camera sites on the map, with the latest image on tap.
 
+- [ ] **Live traffic from NPRA's successor travel-time service.** v0.256.0 removed the Traffic
+      flow layer and the "+N min traffic" ETA correction because `TravelTimeData` and
+      `PredefinedTravelTimeLocations` are phased out from November 2026 (DATA-SOURCES.md →
+      *Corridor travel times*). When Statens vegvesen publishes the replacement, probe its
+      coverage and shape, then decide whether either feature comes back; the old implementation
+      is in git history.
+
 - [ ] **Parking from Vegvesen's *parkeringsregisteret*** (open API, documented with Swagger).
       Probe what it publishes and show parking facilities as a Drive layer.
 

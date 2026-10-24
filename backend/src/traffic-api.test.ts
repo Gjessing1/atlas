@@ -21,44 +21,6 @@ const xml = `
  <sit:roadOrCarriagewayOrLaneManagementType>roadClosed</sit:roadOrCarriagewayOrLaneManagementType>
  </sit:situationRecord></sit:situation></mc:payload></messageContainer>`;
 
-/** One corridor along the test route, and a measurement 60 s over free flow. */
-const corridorsXml = `
-<mc:messageContainer xmlns="http://datex2.eu/schema/3/common" xmlns:mc="http://datex2.eu/schema/3/messageContainer"
- xmlns:loc="http://datex2.eu/schema/3/locationReferencing" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
- <mc:payload xsi:type="loc:PredefinedLocationsPublication" lang="no">
- <publicationTime>2026-07-31T09:00:00+02:00</publicationTime>
- <loc:predefinedLocationReference xsi:type="loc:PredefinedLocation" id="100" version="1">
-  <loc:predefinedLocationName><values><value lang="no">Teststrekning nord</value></values></loc:predefinedLocationName>
-  <loc:location xsi:type="loc:LinearLocation"><loc:gmlLineString srsName="http://www.opengis.net/gml/srs/epsg.xml#32633">
-   <loc:posList>259545 6648086 259581 6648642 259617 6649198</loc:posList>
-  </loc:gmlLineString></loc:location>
- </loc:predefinedLocationReference></mc:payload></mc:messageContainer>`;
-
-const travelTimesXml = `
-<mc:messageContainer xmlns="http://datex2.eu/schema/3/common" xmlns:mc="http://datex2.eu/schema/3/messageContainer"
- xmlns:loc="http://datex2.eu/schema/3/locationReferencing" xmlns:rtd="http://datex2.eu/schema/3/roadTrafficData"
- xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
- <mc:payload xsi:type="rtd:ElaboratedDataPublication" lang="no">
- <publicationTime>2026-07-31T10:00:00+02:00</publicationTime>
- <rtd:physicalQuantity xsi:type="rtd:SinglePhysicalQuantity">
-  <rtd:pertinentLocation xsi:type="loc:LocationByReference">
-   <loc:predefinedLocationReference targetClass="loc:PredefinedLocation" id="100" version="1"/>
-  </rtd:pertinentLocation>
-  <rtd:basicData xsi:type="rtd:TravelTimeData">
-   <rtd:measurementOrCalculationTime><rtd:period>
-    <startOfPeriod>2026-07-31T09:55:00+02:00</startOfPeriod><endOfPeriod>2026-07-31T10:00:00+02:00</endOfPeriod>
-   </rtd:period></rtd:measurementOrCalculationTime>
-   <rtd:travelTime><rtd:duration>180</rtd:duration></rtd:travelTime>
-   <rtd:freeFlowTravelTime><rtd:duration>120</rtd:duration></rtd:freeFlowTravelTime>
-  </rtd:basicData></rtd:physicalQuantity>
- <rtd:physicalQuantity xsi:type="rtd:SinglePhysicalQuantity">
-  <rtd:pertinentLocation xsi:type="loc:LocationByReference">
-   <loc:predefinedLocationReference targetClass="loc:PredefinedLocation" id="100" version="1"/>
-  </rtd:pertinentLocation>
-  <rtd:basicData xsi:type="rtd:TrafficStatus">
-   <rtd:trafficStatus><rtd:trafficStatusValue>slow</rtd:trafficStatusValue></rtd:trafficStatus>
-</rtd:basicData></rtd:physicalQuantity></mc:payload></mc:messageContainer>`;
-
 const weatherSitesXml = `
 <messageContainer xmlns="http://datex2.eu/schema/3/common" xmlns:rtd="http://datex2.eu/schema/3/roadTrafficData"
  xmlns:loc="http://datex2.eu/schema/3/locationReferencing"><publicationTime>2026-07-31T09:00:00+02:00</publicationTime>
@@ -100,16 +62,10 @@ const datexFetch = (overrides: Record<string, () => Response> = {}) =>
         ? 'measuredWeather'
         : href.includes('GetForecastPointData')
           ? 'forecastWeather'
-          : href.includes('GetPredefinedTravelTimeLocations')
-            ? 'corridors'
-            : href.includes('GetTravelTimeData')
-              ? 'travelTimes'
-              : 'situations';
+          : 'situations';
     const override = overrides[key];
     if (override) return override();
     const body = {
-      corridors: corridorsXml,
-      travelTimes: travelTimesXml,
       situations: xml,
       weatherSites: weatherSitesXml,
       measuredWeather: measuredWeatherXml,
@@ -127,54 +83,43 @@ describe('DATEX traffic API', () => {
     });
     await app.ready();
     expect((await app.inject('/api/overlay/traffic/features')).statusCode).toBe(404);
-    expect((await app.inject('/api/overlay/traffic-flow/features')).statusCode).toBe(404);
+    expect((await app.inject('/api/overlay/road-weather/features')).statusCode).toBe(404);
     await app.close();
   });
 
-  it('draws the corridors it measures, and says which it is not measuring', async () => {
+  it('lists the incident and road-weather layers, and no longer serves travel times', async () => {
+    const fetchImpl = datexFetch();
     const app = Fastify();
     const metas = registerTrafficApi(app, new StatusRegistry(), {
       username: 'user',
       password: 'secret',
-      fetchImpl: datexFetch(),
+      fetchImpl,
       now: () => new Date('2026-07-31T10:00:00+02:00'),
     }).metas;
     expect(metas.map(({ id, group, profiles }) => ({ id, group, profiles }))).toEqual([
       { id: 'traffic', group: 'Driving', profiles: ['driving'] },
-      { id: 'traffic-flow', group: 'Driving', profiles: ['driving'] },
       { id: 'road-weather', group: 'Driving', profiles: ['driving'] },
     ]);
     await app.ready();
-    const flow = await app.inject('/api/overlay/traffic-flow/features');
-    expect(flow.statusCode).toBe(200);
-    const [feature] = flow.json().features as Array<{
-      properties: Record<string, unknown>;
-      geometry: { coordinates: [number, number][] };
-    }>;
-    // 180 s against a 120 s reference is 1.5× — slow, whatever the feed's own
-    // `trafficStatusValue` says (the fixture says `slow` too, but the live one
-    // says `freeFlow` for every corridor it measures).
-    expect(feature!.properties).toMatchObject({
-      id: '100',
-      name: 'Teststrekning nord',
-      level: 'slow',
-      durationS: 180,
-      freeFlowS: 120,
-      delayS: 60,
+    // NPRA retires GetTravelTimeData and GetPredefinedTravelTimeLocations from
+    // November 2026. Bundles older than the removal still ask; a 404 is what
+    // they already treat as "no measurement", so the route stands unpriced.
+    expect((await app.inject('/api/overlay/traffic-flow/features')).statusCode).toBe(404);
+    const priced = await app.inject({
+      method: 'POST',
+      url: '/api/traffic/travel-times',
+      payload: {
+        points: [
+          { lat: 59.9, lng: 10.7 },
+          { lat: 59.91, lng: 10.7 },
+        ],
+      },
     });
-    expect(feature!.geometry.coordinates.length).toBeGreaterThanOrEqual(2);
-    await app.close();
-  });
-
-  it('reports an unreachable corridor table as a failure, not an empty road network', async () => {
-    const app = Fastify();
-    registerTrafficApi(app, new StatusRegistry(), {
-      username: 'user',
-      password: 'secret',
-      fetchImpl: datexFetch({ corridors: () => new Response('nope', { status: 503 }) }),
-    });
-    await app.ready();
-    expect((await app.inject('/api/overlay/traffic-flow/features')).statusCode).toBe(502);
+    expect(priced.statusCode).toBe(404);
+    const asked = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls.map(([url]) =>
+      String(url),
+    );
+    expect(asked.some((url) => url.includes('TravelTime'))).toBe(false);
     await app.close();
   });
 
@@ -217,51 +162,9 @@ describe('DATEX traffic API', () => {
       },
     });
     expect(off.json().closures).toEqual([]);
-    // The situation feed is fetched once and cached; the corridor table and
-    // the three road-weather publications are warmed alongside it.
-    expect(fetchImpl).toHaveBeenCalledTimes(5);
-    await app.close();
-  });
-
-  it('prices a route by the corridors it runs on', async () => {
-    const fetchImpl = datexFetch();
-    const app = Fastify();
-    registerTrafficApi(app, new StatusRegistry(), {
-      username: 'user',
-      password: 'secret',
-      fetchImpl,
-      now: () => new Date('2026-07-31T10:00:00+02:00'),
-    });
-    await app.ready();
-    const priced = await app.inject({
-      method: 'POST',
-      url: '/api/traffic/travel-times',
-      payload: {
-        points: [
-          { lat: 59.9, lng: 10.7 },
-          { lat: 59.905, lng: 10.7 },
-          { lat: 59.91, lng: 10.7 },
-        ],
-      },
-    });
-    expect(priced.statusCode).toBe(200);
-    expect(priced.json()).toMatchObject({
-      delayMs: 60_000,
-      measuredAt: '2026-07-31T10:00:00+02:00',
-      segments: [{ corridorId: '100', name: 'Teststrekning nord', status: 'slow' }],
-    });
-
-    const elsewhere = await app.inject({
-      method: 'POST',
-      url: '/api/traffic/travel-times',
-      payload: {
-        points: [
-          { lat: 63.43, lng: 10.39 },
-          { lat: 63.44, lng: 10.39 },
-        ],
-      },
-    });
-    expect(elsewhere.json()).toMatchObject({ delayMs: 0, segments: [] });
+    // The situation feed is fetched once and cached; the three road-weather
+    // publications are warmed alongside it.
+    expect(fetchImpl).toHaveBeenCalledTimes(4);
     await app.close();
   });
 
@@ -301,7 +204,7 @@ describe('DATEX traffic API', () => {
     await app.close();
   });
 
-  it('says on the status page how many corridors are actually measuring', async () => {
+  it('says on the status page how many situations are current', async () => {
     // A healthy source whose detail line is empty is the weak half of N7: the
     // useful question is not "did the feed answer" but "how much of it is
     // reporting", and `record`'s message is dropped on success.
@@ -314,28 +217,16 @@ describe('DATEX traffic API', () => {
       now: () => new Date('2026-07-31T10:00:00+02:00'),
     });
     await app.ready();
-    await app.inject({
-      method: 'POST',
-      url: '/api/traffic/travel-times',
-      payload: {
-        points: [
-          { lat: 59.9, lng: 10.7 },
-          { lat: 59.91, lng: 10.7 },
-        ],
-      },
-    });
+    await app.inject('/api/overlay/traffic/features');
     const sources = registry.toStatus();
-    expect(sources.find((source) => source.id === 'datex-traveltime')).toMatchObject({
-      health: 'ok',
-      detail: '1 of 1 corridors measuring',
-    });
     expect(sources.find((source) => source.id === 'datex')?.detail).toBe('1 current situations');
+    expect(sources.find((source) => source.id === 'datex-traveltime')).toBeUndefined();
     await app.close();
   });
 
   it('rejects a request without a route and reports an upstream failure', async () => {
     const fetchImpl = datexFetch({
-      travelTimes: () => new Response('nope', { status: 503 }),
+      situations: () => new Response('nope', { status: 503 }),
     });
     const app = Fastify();
     registerTrafficApi(app, new StatusRegistry(), {
@@ -346,13 +237,13 @@ describe('DATEX traffic API', () => {
     await app.ready();
     const short = await app.inject({
       method: 'POST',
-      url: '/api/traffic/travel-times',
+      url: '/api/traffic/closures',
       payload: { points: [{ lat: 59.9, lng: 10.7 }] },
     });
     expect(short.statusCode).toBe(400);
     const failed = await app.inject({
       method: 'POST',
-      url: '/api/traffic/travel-times',
+      url: '/api/traffic/closures',
       payload: {
         points: [
           { lat: 59.9, lng: 10.7 },
@@ -360,8 +251,8 @@ describe('DATEX traffic API', () => {
         ],
       },
     });
-    // 502, not a fabricated zero: the client treats a failure as "no
-    // measurement" itself, and the two must stay distinguishable here.
+    // 502, not a fabricated empty list: the client decides what an unreachable
+    // feed means, and "no closures" must stay distinguishable from it.
     expect(failed.statusCode).toBe(502);
     await app.close();
   });

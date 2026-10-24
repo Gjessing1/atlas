@@ -214,7 +214,6 @@ export interface CompactNavState {
   trailM: number | null;
   remainingM: number | null;
   remainingMs: number;
-  trafficMs: number;
   /** The maneuver being approached, by index into the route's instruction table. */
   upcoming: [number, number] | null;
   then: [number, number] | null;
@@ -249,7 +248,6 @@ export function compactNavState(state: NavState): CompactNavState {
     trailM: round(state.trailM, 1),
     remainingM: round(state.distanceRemainingM, 1),
     remainingMs: Math.round(state.timeRemainingMs),
-    trafficMs: Math.round(state.trafficDelayMs),
     upcoming: state.upcoming
       ? [state.upcoming.index, round(state.upcoming.distanceToM, 1) ?? 0]
       : null,

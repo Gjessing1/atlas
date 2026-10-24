@@ -200,8 +200,8 @@ export type NavStage =
 export interface NavLifecycle {
   /**
    * Trip identity. Bumped whenever ownership changes (Start, Go, Pause, End,
-   * arrival) so an asynchronous reroute, faster-route probe or traffic
-   * re-pricing that captured it can tell that it no longer speaks for the
+   * arrival) so an asynchronous reroute, faster-route probe or road-weather
+   * refresh that captured it can tell that it no longer speaks for the
    * running trip — the race that would otherwise flip a fresh preview into
    * `navigating` as an abandoned trip's route lands.
    */
@@ -282,8 +282,6 @@ export type NavEvent =
   /** The offer lapsed, expired or was overtaken by a new route. */
   | { type: 'faster-withdrawn' }
   | { type: 'faster-dismissed' }
-  /** Same roads, new schedule: live traffic re-priced the followed route. */
-  | { type: 'path-repriced'; path: RoutePath }
   /** The first fix after a resume has been applied. */
   | { type: 'resume-anchored'; traveledM: number }
   | { type: 'pause'; atMs: number; traveledM: number | null }
@@ -612,10 +610,6 @@ export function navLifecycleReducer(state: NavLifecycle, event: NavEvent): NavLi
     case 'faster-dismissed':
       if (stage.kind !== 'guiding' || stage.offer === null) return state;
       return { ...state, stage: { ...stage, offer: null, dismissedSavingMs: stage.offer.savesMs } };
-
-    case 'path-repriced':
-      if (stage.kind !== 'guiding') return state;
-      return { ...state, stage: { ...stage, path: event.path } };
 
     case 'resume-anchored': {
       if (stage.kind !== 'guiding' || stage.resumeAnchor === null) return state;

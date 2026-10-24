@@ -1,6 +1,5 @@
 import type { NavController } from '@atlas/app-hooks';
 import { pathViaLabels, ROUTING_PROFILES } from '@atlas/routing';
-import { formatTrafficDelay } from '@atlas/traffic';
 import { useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
@@ -114,9 +113,6 @@ export function RoutePreview({ nav, bottomInset }: { nav: NavController; bottomI
                 <Text style={styles.choiceDetail}>
                   {formatDistance(path.distanceM)}
                   {vias[i] ? ` · via ${vias[i]}` : i === 0 ? ' · fastest' : ''}
-                  {formatTrafficDelay(path.trafficDelayMs)
-                    ? ` · ${formatTrafficDelay(path.trafficDelayMs)}`
-                    : ''}
                 </Text>
                 {path.roadWeather?.warnings[0] ? (
                   <Text style={styles.weatherWarning}>

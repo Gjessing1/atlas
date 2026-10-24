@@ -13,7 +13,6 @@ import {
   identifyValueUrl,
   huntingFieldIdentify,
   speedCameraIdentify,
-  trafficFlowIdentify,
   trafficIdentify,
   viewportFeaturesUrl,
   roadWeatherIdentify,
@@ -438,43 +437,6 @@ describe('local overlay identify groups', () => {
         'Valid until': '2026-07-31T18:00:00+02:00',
       },
     });
-  });
-
-  it('says how a corridor is running, against its own reference and with its age', () => {
-    // The reading's age is shown on the *reader's* clock — they are standing in
-    // the traffic — so the fixture is built in local time, as fmtClock's own
-    // tests are, and the assertion holds in whatever timezone the suite runs in.
-    const measuredAt = new Date(2026, 7, 3, 7, 30).toISOString();
-    expect(
-      trafficFlowIdentify({
-        name: 'Helsfyr - Ryen',
-        level: 'slow',
-        durationS: 506,
-        freeFlowS: 300,
-        measuredAt,
-      }),
-    ).toEqual({
-      title: 'Traffic flow',
-      properties: {
-        Stretch: 'Helsfyr - Ryen',
-        Traffic: 'Slow',
-        'Travel time': '8 min (normally 5 min)',
-        Measured: '07:30',
-      },
-    });
-    // The row that must never be missing: a grey corridor has to say it has no
-    // reading rather than quietly show nothing.
-    expect(trafficFlowIdentify({ name: 'Ryen - Helsfyr', level: 'unmeasured' })).toEqual({
-      title: 'Traffic flow',
-      properties: { Stretch: 'Ryen - Helsfyr', Traffic: 'Not measured right now' },
-    });
-    // Android's native bridge can hand a number back as text.
-    expect(
-      trafficFlowIdentify({ level: 'busy', durationS: '345', freeFlowS: '300' })?.properties[
-        'Travel time'
-      ],
-    ).toBe('6 min (normally 5 min)');
-    expect(trafficFlowIdentify(null)).toBeNull();
   });
 
   it('identifies a road-temperature reading with risk and freshness', () => {

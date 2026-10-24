@@ -8,7 +8,6 @@ import {
   PUBLIC_TOILETS_ID,
   publicToiletIdentify,
   speedCameraIdentify,
-  trafficFlowIdentify,
   trafficIdentify,
   roadWeatherIdentify,
   type LatLng,
@@ -23,7 +22,6 @@ import {
   weatherWarningIdentify,
 } from '@atlas/conditions';
 import { viaInsertIndex } from '@atlas/routing';
-import { tappedFlowProperties } from '@atlas/traffic';
 import { transitVehicleIdentify } from '@atlas/transit';
 import type { MapRef } from '@maplibre/maplibre-react-native';
 import type { PlaceRecord } from '@atlas/storage';
@@ -34,7 +32,6 @@ import { STATSKOG_JAKTFELT_ID } from '../layers/useHuntingFields';
 import type { ActiveOverlay } from '../layers/useOverlays';
 import { SPEED_CAMERAS_ID } from '../layers/useSpeedCameras';
 import { TRAFFIC_ID } from '../layers/useTraffic';
-import { TRAFFIC_FLOW_ID } from '../layers/useTrafficFlow';
 import { ROAD_WEATHER_ID } from '../layers/useRoadWeather';
 import { TRANSIT_VEHICLES_ID } from '../layers/useTransitVehicles';
 import type { RoutePlanner } from '../routing/useRoute';
@@ -48,7 +45,6 @@ import {
   NAV_PREVIEW_LAYER_IDS,
   PLAN_LINE_LAYER_ID,
   SPEED_CAMERA_LAYER_IDS,
-  TRAFFIC_FLOW_LAYER_IDS,
   TRAFFIC_LAYER_IDS,
   ROAD_WEATHER_LAYER_IDS,
   TRANSIT_VEHICLE_LAYER_IDS,
@@ -326,7 +322,6 @@ export function useMapPress({
               toiletHits,
               cameraHits,
               trafficHits,
-              flowHits,
               roadWeatherHits,
               transitVehicleHits,
               warningHits,
@@ -347,7 +342,6 @@ export function useMapPress({
               query(vectorOn(PUBLIC_TOILETS_ID), PUBLIC_TOILET_LAYER_IDS),
               query(vectorOn(SPEED_CAMERAS_ID), SPEED_CAMERA_LAYER_IDS),
               query(vectorOn(TRAFFIC_ID), TRAFFIC_LAYER_IDS),
-              query(vectorOn(TRAFFIC_FLOW_ID), TRAFFIC_FLOW_LAYER_IDS),
               query(vectorOn(ROAD_WEATHER_ID), ROAD_WEATHER_LAYER_IDS),
               query(vectorOn(TRANSIT_VEHICLES_ID), TRANSIT_VEHICLE_LAYER_IDS),
               query(vectorOn(WEATHER_WARNINGS_ID), WEATHER_WARNING_LAYER_IDS),
@@ -362,9 +356,6 @@ export function useMapPress({
               speedCameraIdentify(hitProps(cameraHits)),
               trafficIdentify(hitProps(trafficHits)),
               transitVehicleIdentify(hitProps(transitVehicleHits)),
-              // Not `hitProps`: the tap box catches both directions of the
-              // same road, so the corridor to describe is chosen, not taken.
-              trafficFlowIdentify(tappedFlowProperties({ lat, lng }, flowHits)),
               roadWeatherIdentify(hitProps(roadWeatherHits)),
               huntingFieldIdentify(hitProps(huntHits)),
               publicToiletIdentify(hitProps(toiletHits)),

@@ -213,18 +213,6 @@ export interface RouteInstruction {
   sign: number;
   streetName?: string;
   interval: [number, number];
-  /**
-   * How much of this maneuver's `timeMs` is measured congestion rather than
-   * the engine's schedule — this leg's share of `RoutePath.trafficDelayMs`,
-   * and like it **already included** in `timeMs`.
-   *
-   * Recorded per maneuver, not just per route, because a delay only stays
-   * honest while it can be *removed*: re-pricing a route mid-drive means
-   * dropping the measurement it was built with and applying the current one,
-   * and navigation can only say how much of the *remaining* time is traffic if
-   * it knows which legs the jam sits on.
-   */
-  trafficDelayMs?: number;
   /** Which exit to take, for roundabout maneuvers (`sign === 6`). */
   exitNumber?: number;
   /**
@@ -371,15 +359,6 @@ export interface RoutePath {
    * shape through RouteEnrichment.
    */
   enrichment?: RouteEnrichment;
-  /**
-   * How much of `timeMs` is measured congestion rather than the engine's own
-   * schedule. Set from NPRA's corridor travel times where the route runs
-   * on a measured stretch, and **already included in `timeMs`** — it is the
-   * part a UI may name, not a number to add on. Absent means no measurement
-   * covered this route, which is the normal case outside the Norwegian
-   * corridors and everywhere without a live traffic feed.
-   */
-  trafficDelayMs?: number;
   /** Route-matched NPRA road observations/forecasts that indicate ice risk. */
   roadWeather?: RoadWeatherRoute;
 }

@@ -35,7 +35,7 @@ import {
   vehicleChipLabel,
 } from '@atlas/routing';
 import type { CollectionRecord, PlaceRecord } from '@atlas/storage';
-import { formatRoadWeatherWarning, formatTrafficDelay } from '@atlas/traffic';
+import { formatRoadWeatherWarning } from '@atlas/traffic';
 import type { TransitTrip } from '@atlas/transit';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -1054,12 +1054,6 @@ export function RoutePanel({
                     <Text style={styles.summaryTime}>{fmtDuration(path.timeMs)}</Text>
                     <Text style={styles.summaryDetail}>
                       {fmtKm(path.distanceM)} · ETA {fmtEta(path.timeMs)}
-                      {/* The measured part of that time, named rather than
-                          silently folded in — an ETA that moved for a reason
-                          should say so. */}
-                      {formatTrafficDelay(path.trafficDelayMs)
-                        ? ` · ${formatTrafficDelay(path.trafficDelayMs)}`
-                        : ''}
                     </Text>
                     {/* Climb on its own line rather than a fourth clause on the
                         one above: with Start beside it the detail line has no
