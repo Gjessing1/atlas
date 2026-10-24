@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  decodeMapHash,
-  decodeMapLink,
-  decodePanelLink,
-  panelHash,
-  encodeMapHash,
-} from './index.js';
+import { decodeMapHash, decodeMapLink, encodeMapHash } from './index.js';
 
 describe('map hash', () => {
   it('round-trips camera and pin', () => {
@@ -138,24 +132,5 @@ describe('decodeMapLink', () => {
   it('rejects URLs without a map fragment', () => {
     expect(decodeMapLink('https://atlas.example/')).toBeNull();
     expect(decodeMapLink('atlas://remap=1/2/3')).toBeNull();
-  });
-});
-
-describe('decodePanelLink', () => {
-  it('reads a panel request from a link or a bare hash', () => {
-    expect(decodePanelLink('https://atlas.example/#panel=commute')).toBe('commute');
-    expect(decodePanelLink(panelHash('commute'))).toBe('commute');
-    expect(decodePanelLink('atlas://panel=commute')).toBe('commute');
-  });
-
-  it('needs no map fragment — opening a board says nothing about the camera', () => {
-    expect(decodeMapLink('https://atlas.example/#panel=commute')).toBeNull();
-    expect(decodePanelLink('https://atlas.example/#map=5/1/2&panel=commute')).toBe('commute');
-  });
-
-  it('ignores panels it does not know, and near misses', () => {
-    expect(decodePanelLink('https://atlas.example/#panel=settings')).toBeNull();
-    expect(decodePanelLink('https://atlas.example/#nopanel=commute')).toBeNull();
-    expect(decodePanelLink('https://atlas.example/')).toBeNull();
   });
 });

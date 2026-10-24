@@ -275,7 +275,6 @@ export function RoutePanel({
   onOpenVehicleSettings,
   onShowTransitTrip,
   onStartTransitGuidance,
-  onMakeCommute,
   getMyLocation,
   locatingOrigin = false,
   bottomInset = 0,
@@ -317,8 +316,6 @@ export function RoutePanel({
   onShowTransitTrip: (trip: TransitTrip) => void;
   /** Start the timetable-driven passenger companion for one selected journey. */
   onStartTransitGuidance: (trip: TransitTrip) => void;
-  /** Save this planner corridor and hand it to the commute board. */
-  onMakeCommute?: () => void;
   /** A GPS fix for the "My location" shortcut, or null when unavailable. */
   getMyLocation: () => Promise<LatLng | null>;
   /** Directions opened before its automatic current-position lookup finished. */
@@ -1312,7 +1309,6 @@ export function RoutePanel({
           <TransitResults
             transit={transit}
             onStartGuidance={onStartTransitGuidance}
-            onMakeCommute={onMakeCommute}
             onShowMap={(trip, index) => {
               transit.select(index);
               Keyboard.dismiss();

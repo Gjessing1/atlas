@@ -245,7 +245,6 @@ export function RoutePanel({
   onNavigate,
   onOpenVehicleSettings,
   onStartTransitGuidance,
-  onMakeCommute,
   onSaveTrack,
   garmin,
   onOpenGarminSettings,
@@ -276,8 +275,6 @@ export function RoutePanel({
   onOpenVehicleSettings: () => void;
   /** Start the timetable-driven passenger companion for one selected journey. */
   onStartTransitGuidance: (trip: TransitTrip) => void;
-  /** Save this planner corridor and hand it to the commute board. */
-  onMakeCommute?: () => void;
   onSaveTrack: (data: TrackData, name: string, collectionId: string | null) => Promise<boolean>;
   garmin: GarminState;
   onOpenGarminSettings: () => void;
@@ -1225,11 +1222,7 @@ export function RoutePanel({
           </p>
         )}
         {transitMode && (
-          <TransitResults
-            transit={transit}
-            onStartGuidance={onStartTransitGuidance}
-            onMakeCommute={onMakeCommute}
-          />
+          <TransitResults transit={transit} onStartGuidance={onStartTransitGuidance} />
         )}
         {!transitMode && destination && (
           <button

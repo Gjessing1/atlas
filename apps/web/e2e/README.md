@@ -53,22 +53,11 @@ Locator traps (v0.222.0):
   the week inside the expanded section, or the status line as a pattern — never a literal time as
   today's.
 - **Current speed lives in `.nav-speed-cluster`** (with the limit sign), not in `.nav-widget`.
-- **Commute configuration is behind the header's ⋮** (v0.235.0): click `Commute settings` before
-  `Rename commute`, `Add commute`, `Edit commute` or the Android-widget choice, and again for each
-  one (every row closes the menu). The `Saved commute` select only exists with two or more
-  commutes. A journey card's clock times and platforms are in its itinerary, behind `Details` on
-  the lead card (a row opens on its head); the planner hand-off is `Open in planner`, inside it.
-
 - **A style-name assertion cannot see a switch between two styles that differ only in `name`.**
   MapLibre's style diff has no operation for `name`, so `setStyle` of an otherwise identical style
   is a no-op and `getStyle().name` keeps the old value. On the one-layer fixture styles Explore and
   Drive are exactly that (v0.227.0's 3D test); assert what the switch changes instead
   (`style.terrain`, the control's label).
-
-Known stale test (2026-09-18, not yet fixed): `core.spec.ts` "transit stop search plans exact stops
-and starts guided transit" waits for a "Search for a destination" box, but with no geolocation the
-planner now asks "Search for a start" after the only stop is changed. It fails the same way on a
-tree whose planner the change did not touch.
 
 Known flake: `core.spec.ts` "direction-arrow source is selectable and persists" gives the OPFS
 write 250 ms before reloading and can read the old value when it runs mid-suite. It passes on its

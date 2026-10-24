@@ -3,7 +3,6 @@ import {
   booleanSetting,
   clampExploreRadiusM,
   decodeMapHash,
-  decodePanelLink,
   fmtDistanceM,
   garminActivityLabel,
   haversineM,
@@ -33,13 +32,10 @@ import {
 } from '@atlas/core';
 import {
   collectionTagSuggestions,
-  plannedCommuteFromWaypoints,
-  routePlanFromCommute,
   useMapProfile,
   useMapProfilePreferences,
   useMapStyleEditor,
   useMeasure,
-  useCommute,
   useNavAddStop,
   useNavPrefs,
   useVehicleProfile,
@@ -63,7 +59,6 @@ import {
   useWeatherGrid,
   useWeatherMaps,
   useSkyLayers,
-  type CommuteFn,
   type FetchNearbyFn,
   type PotentialView,
   type PoiViewportFetch,
@@ -75,7 +70,7 @@ import {
   weatherPointUrl,
   type WeatherPointSample,
 } from '@atlas/conditions';
-import { fetchTransitCommute, fetchTransitCommuteSegments, type TransitTrip } from '@atlas/transit';
+import type { TransitTrip } from '@atlas/transit';
 import { spotPlaceDraft, type PotentialSpot } from '@atlas/potential';
 import { trackBounds, type TrackData } from '@atlas/gpx';
 import {
@@ -98,7 +93,6 @@ import {
   SettingsIcon,
   StarIcon,
   SunIcon,
-  TrainIcon,
 } from './icons.js';
 import { ExplorePanel, type ExploreArea } from './explore/ExplorePanel.js';
 import { WeatherDock } from './weather/WeatherDock.js';
@@ -178,21 +172,6 @@ const WeatherPanel = lazy(() =>
 const SettingsPanel = lazy(() =>
   import('./settings/SettingsPanel.js').then((m) => ({ default: m.SettingsPanel })),
 );
-const CommutePanel = lazy(() =>
-  import('./transit/CommutePanel.js').then((m) => ({ default: m.CommutePanel })),
-);
-
-// The two door journeys answer first. Interchange departures arrive afterwards
-// without holding up the everyday outbound/return board.
-const fetchCommute: CommuteFn = async (query, signal, commit, onSegments) => {
-  if (query.via.length > 0 && onSegments) {
-    void fetchTransitCommuteSegments(query, { signal })
-      .then(onSegments)
-      .catch(() => onSegments(null));
-  }
-  return fetchTransitCommute(query, { signal, commit });
-};
-
 const DEFAULT_VIEW: MapViewState = { center: { lat: 59.91, lng: 10.75 }, zoom: 5 }; // Oslo
 const TERRAIN_3D_SETTING = booleanSetting({
   key: 'local.map.terrain-3d',
@@ -213,20 +192,15 @@ const hashView = decodeMapHash(window.location.hash);
 const initialView = hashView ?? DEFAULT_VIEW;
 // A plan carried by the link the user opened; restored once storage is ready.
 const linkedPlan = hashView?.route ? planFromHash(hashView.route) : null;
-// `#panel=commute` — the link the Android commute widget's tap follows, read
-// here too so one URL opens the same board in a browser and on a phone.
-const linkedPanel = decodePanelLink(window.location.hash);
 
 /**
- * The four toolbar drawers. They are all `min(340px, 100vw - 24px)` wide and
+ * The toolbar drawers. They are all `min(340px, 100vw - 24px)` wide and
  * anchored to one of the two top corners, so at phone width any two of them
  * cover each other — which makes "at most one is open" a property of the
  * layout, not a preference. One value carries it; five independent booleans
- * meant every toolbar button hand-closed a different subset of the others
- * (Settings closed Explore and Commute but left Collections up, Collections
- * closed Explore and Commute but left Settings up).
+ * meant every toolbar button hand-closed a different subset of the others.
  */
-type PanelId = 'collections' | 'explore' | 'commute' | 'settings';
+type PanelId = 'collections' | 'explore' | 'settings';
 
 interface SatelliteSelection {
   layerId: typeof SATELLITES_ID | typeof STARLINK_ID;
@@ -274,7 +248,7 @@ export function App() {
   const [revealItem, setRevealItem] = useState<CollectionRevealTarget | null>(null);
   // Which drawer is open — see {@link PanelId}. The named booleans below are
   // read-only views of it, so the render tree still says which panel it means.
-  const [panel, setPanel] = useState<PanelId | null>(linkedPanel === 'commute' ? 'commute' : null);
+  const [panel, setPanel] = useState<PanelId | null>(null);
   const togglePanel = useCallback(
     (id: PanelId) => setPanel((current) => (current === id ? null : id)),
     [],
@@ -300,7 +274,6 @@ export function App() {
     setSettingsSection('appearance');
     togglePanel('settings');
   }, [togglePanel]);
-  const commuteOpen = panel === 'commute';
   const exploreOpen = panel === 'explore';
   const [exploreResults, setExploreResults] = useState<SearchResult[]>([]);
   const [exploreSelection, setExploreSelection] = useState<string | null>(null);
@@ -314,7 +287,6 @@ export function App() {
   const userData = useUserData();
   const sync = useSync(userData);
   const garmin = useGarmin(sync, userData);
-  const commute = useCommute(userData, userData.places, fetchCommute, commuteOpen);
   const appearance = useThemeMode(userData, useSystemColorScheme());
   const mapStyleEditor = useMapStyleEditor(userData);
   useEffect(() => {
@@ -333,10 +305,6 @@ export function App() {
   // profiles. The panel lists the journeys; the map draws the selected one, and
   // the road line stands down while it does.
   const transit = useTransitPlan(route, transitPreferences.value);
-  const plannedCommute = useMemo(
-    () => plannedCommuteFromWaypoints(route.waypoints),
-    [route.waypoints],
-  );
   // The place card's hand-off into the planner (seeds "My location" as start).
   const directions = useDirections(route);
 
@@ -672,22 +640,6 @@ export function App() {
       stopRoute();
     },
     [stopRoute, transit.startGuidance],
-  );
-  const makePlannedCommute = useCallback(() => {
-    if (!plannedCommute || !commute.ready) return;
-    commute.saveCommute(plannedCommute.config, plannedCommute.name);
-    route.stop();
-    setPanel('commute');
-  }, [commute, plannedCommute, route]);
-  const openCommuteJourney = useCallback(
-    (trip: TransitTrip) => {
-      if (!commute.query) return;
-      route.restore(routePlanFromCommute(commute.query));
-      transit.prepareJourney(trip.startMs, commute.query.filter.modes);
-      transit.setEnabled(true);
-      closePanels();
-    },
-    [closePanels, commute.query, route, transit],
   );
   // "Directions" on the place card opens the planner with that point as the
   // destination (Android parity): the planner is the one travel-mode picker, so
@@ -1350,16 +1302,6 @@ export function App() {
         <button
           type="button"
           className="sidebar-toggle"
-          aria-label="Commute"
-          title="Commute"
-          aria-expanded={commuteOpen}
-          onClick={() => togglePanel('commute')}
-        >
-          <TrainIcon size={18} />
-        </button>
-        <button
-          type="button"
-          className="sidebar-toggle"
           aria-label="Explore nearby places"
           title="Explore"
           aria-expanded={exploreOpen}
@@ -1739,14 +1681,6 @@ export function App() {
             garmin={garmin}
             onOpenGarminSettings={openGarminSettings}
             onStartTransitGuidance={startTransitGuidance}
-            onMakeCommute={
-              plannedCommute &&
-              commute.ready &&
-              (commute.canAddCommute ||
-                (commute.commutes.length === 1 && !commute.config.from && !commute.config.to))
-                ? makePlannedCommute
-                : undefined
-            }
             onSaveTrack={async (data, name, collectionId) =>
               (await userData.saveTrack(data, name, collectionId)) !== null
             }
@@ -1766,7 +1700,6 @@ export function App() {
             }}
             pinLabels={pinLabels}
             selectedTrackId={selectedTrack?.track.id ?? null}
-            placeCommutes={commute.placeCommutes}
             revealItem={revealItem}
             onRevealed={onRevealed}
             onShowPlace={showPlace}
@@ -1794,15 +1727,6 @@ export function App() {
             profilePreferences={profilePreferences}
             onExportAll={() => void userData.exportAll()}
             onClose={closePanels}
-          />
-        )}
-        {commuteOpen && (
-          <CommutePanel
-            commute={commute}
-            places={userData.places}
-            getBias={getBias}
-            onClose={closePanels}
-            onOpenJourney={openCommuteJourney}
           />
         )}
         {/* Route detail samples terrain heights; outside coverage, skip the

@@ -28,7 +28,6 @@ import { SettingsSheet } from './SettingsSheet';
 
 interface AppSheetsProps {
   data: UserData;
-  placeCommutes?: ReadonlyMap<string, readonly string[]>;
   sync: SyncState;
   garmin: GarminState;
   packs: LocalPack[];
@@ -94,7 +93,6 @@ interface AppSheetsProps {
  */
 export function AppSheets({
   data,
-  placeCommutes,
   sync,
   garmin,
   packs,
@@ -155,7 +153,6 @@ export function AppSheets({
         onRevealed={onRevealedCollectionItem}
         onClose={onCloseFavorites}
         places={data.places}
-        placeCommutes={placeCommutes}
         tracks={data.tracks}
         collections={data.collections}
         pinLabels={pinLabels}

@@ -69,8 +69,6 @@ export const PARITY_SURFACE_HOMES: Readonly<Record<string, string>> = {
   'apps/android/src/ui/FavoritesSheet.tsx': 'Collections',
   'apps/web/src/explore/ExplorePanel.tsx': 'Explore',
   'apps/android/src/ui/ExploreSheet.tsx': 'Explore',
-  'apps/web/src/transit/CommutePanel.tsx': 'Commute',
-  'apps/android/src/ui/CommuteSheet.tsx': 'Commute',
   'apps/web/src/settings/SettingsPanel.tsx': 'Settings',
   // Rendered *inside* the Settings panel's Account & data tab, which is the
   // surface the user is on — Android answers the same rows from its own

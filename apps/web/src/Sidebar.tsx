@@ -42,8 +42,6 @@ interface SidebarProps {
   /** Which folders and tags draw their pins' names on the map. */
   pinLabels: PinLabelsController;
   selectedTrackId: string | null;
-  /** Commutes that use each saved place as an end. */
-  placeCommutes?: ReadonlyMap<string, readonly string[]>;
   /**
    * A place to bring into view as the sidebar opens: its folders are expanded
    * and the row is scrolled to and highlighted. Null when nothing asked.
@@ -191,7 +189,6 @@ export function Sidebar({
   onEditGarminCourse,
   pinLabels,
   selectedTrackId,
-  placeCommutes = new Map(),
   revealItem = null,
   onRevealed,
   onShowPlace,
@@ -445,14 +442,6 @@ export function Sidebar({
           <button type="button" className="item-name" onClick={() => onShowPlace(place)}>
             {place.name}
           </button>
-          {placeCommutes.has(place.id) && (
-            <span
-              className="place-commute-badge"
-              title={`Used by ${placeCommutes.get(place.id)!.join(', ')}`}
-            >
-              Commute
-            </span>
-          )}
           <span className="row-actions">
             {/* Straight into the planner, as on Android. Without it the same
                 trip was row → card → Directions on this client alone. */}

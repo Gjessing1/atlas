@@ -4,16 +4,6 @@ import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, normalize } from 'node:path';
 
-// Rendered by `@atlas/transit`, from its built `dist/` — so a commute board and
-// a widget board in this fixture are the ones the backend would send, not a
-// second implementation of them. Needs `npm run build:packages` to have run,
-// which every path that reaches the regression (the gate, both publish scripts)
-// already has.
-import {
-  commuteFixtureResponse,
-  lastWidgetBoard,
-  widgetFixtureResponse,
-} from './transit-fixture.mjs';
 import { garminFixtureEnabled, handleGarminFixture } from './garmin-fixture.mjs';
 
 const host = process.env.ATLAS_E2E_HOST ?? '0.0.0.0';
@@ -23,7 +13,7 @@ const assetsRoot = process.env.ATLAS_E2E_ASSETS ?? '/mnt/data/atlas/assets';
 const ORIGIN = { lat: 59.8337, lng: 10.4348 };
 const DESTINATION = { lat: 59.9147, lng: 10.7333 };
 const SAVED = { lat: 59.876, lng: 10.55 };
-/** The commute's interchange — a corridor needs three stops to have a change. */
+/** Intermediate stop on the transit fixture corridor. */
 const INTERCHANGE = { lat: 59.8334, lng: 10.4343 };
 const COMMUTE_STOPS = [
   { match: 'engelsrud', name: 'Engelsrud E2E', position: ORIGIN, stopId: 'NSR:StopPlace:59872' },
@@ -148,7 +138,7 @@ function searchResults(query, transit = false) {
       },
     ];
   }
-  // The commute corridor's three stops. Named for real places
+  // The transit fixture corridor's three stops. Named for real places
   // rather than "E2E Origin" for one reason that shows on the widget: the
   // selector's chip is the *first word* of the far end (`directionShort`), so a
   // corridor whose ends both begin "E2E" would draw two chips reading "TO E2E"
@@ -326,29 +316,6 @@ const server = createServer(async (request, response) => {
     if (url.pathname === '/api/transit' && request.method === 'POST') {
       await readJson(request);
       return json(response, transitResult());
-    }
-    // The commute board and the home-screen widget. Both boards
-    // come back rendered by `@atlas/transit`, so what the regression reads off
-    // the launcher is what the backend would have sent.
-    if (url.pathname === '/api/transit/commute' && request.method === 'POST') {
-      return json(response, commuteFixtureResponse(await readJson(request), Date.now()));
-    }
-    if (url.pathname === '/api/transit/widget' && request.method === 'POST') {
-      const board = widgetFixtureResponse(await readJson(request), Date.now());
-      return json(response, board, board?.error ? 400 : 200);
-    }
-    // What the widget was last *told* to paint. The regression asserts the home
-    // screen against this rather than against a copy of the expected rows kept
-    // in the test, which would be a second thing to keep true.
-    //
-    // Answered with `connection: close`. The regression drives adb through
-    // synchronous child processes, so its event loop can sit blocked past this
-    // server's 5 s keep-alive timeout; the next fetch then reuses a socket the
-    // server already closed and fails with `UND_ERR_SOCKET other side closed`
-    // — which failed v0.243.0's stop-widget step twice, identically.
-    if (url.pathname === '/api/e2e/widget-board') {
-      response.setHeader('connection', 'close');
-      return json(response, lastWidgetBoard(url.searchParams.get('variant') ?? 'v2'));
     }
     if (url.pathname === '/api/e2e/route-queries') {
       response.setHeader('connection', 'close');

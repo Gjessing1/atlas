@@ -2,8 +2,7 @@
 
 `run-regression.sh` installs a release-candidate APK on the `atlas_test` AVD, starts the fixture
 backend on port 3199 (`fixture-server.mjs`) and drives the app (`regression.mjs`): saved
-places and folders, road and transit planning, navigation hand-off, persistence, the commute board
-and the home-screen commute widget. The ordinary OTA and APK publish scripts run it first. Native
+places and folders, road and transit planning, navigation hand-off, persistence, and rotation. The ordinary OTA and APK publish scripts run it first. Native
 releases use `publish-native.sh`, which tests one signed APK once, then publishes the APK and its
 OTA baseline together. A failed regression publishes neither artifact:
 

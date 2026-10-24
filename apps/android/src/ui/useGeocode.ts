@@ -10,9 +10,7 @@ import { geoSearch, type SearchBias } from '../search/geoSearch';
  * for with no network at all. Viewport bias applies only to the free stop
  * search; an along-route search is already constrained by the route's bbox.
  *
- * Lives in its own module because the route planner is no longer the only
- * surface that picks a stop: the commute board's From / Via / To use the same
- * seam, and the web app split its copy out for the same reason.
+ * The planner shares this search seam across its stop controls.
  */
 export function useGeocode(packs: LocalPack[], getBias: SearchBias): StopGeocodeFn {
   return useCallback(

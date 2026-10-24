@@ -1377,16 +1377,6 @@ test('transit stop search plans exact stops and starts guided transit', async ({
       },
     });
   });
-  await page.route('**/api/transit/commute', (route) => {
-    route.fulfill({
-      json: {
-        outbound: { trips: servedTrip ? [servedTrip] : [], problems: [] },
-        inbound: { trips: [], problems: [] },
-        segments: [],
-      },
-    });
-  });
-
   await page.goto('/#map=13/59.91/10.75');
   await waitForMap(page);
   await openRoutePlannerAt(page, 59.905, 10.74);
@@ -1394,18 +1384,17 @@ test('transit stop search plans exact stops and starts guided transit', async ({
 
   await page.locator('.route-wp-tap').click();
   const editSearch = page.locator('.route-wp-edit');
-  await editSearch.getByRole('searchbox', { name: 'Change this stop' }).fill('Oslo');
-  await expect(editSearch.locator('li').first()).toContainText('Bus · Train · Oslo');
-  await expect(editSearch.getByRole('button', { name: /Oslo S/ })).toHaveCount(1);
-  await editSearch.getByRole('button', { name: /Oslo S/ }).click();
-
-  const search = page.locator('.route-stop-search');
-  await search.getByRole('searchbox', { name: 'Search for a destination' }).fill('National');
-  await expect(search.locator('li').first()).toContainText('Train · Tram · Oslo');
-  await search
+  await editSearch.getByRole('searchbox', { name: 'Change this stop' }).fill('National');
+  await expect(editSearch.locator('li').first()).toContainText('Train · Tram · Oslo');
+  await editSearch
     .getByRole('button', { name: /Nationaltheatret/ })
     .first()
     .click();
+
+  const search = page.locator('.route-stop-search');
+  await search.getByRole('searchbox', { name: 'Search for a start' }).fill('Oslo');
+  await expect(search.locator('li').first()).toContainText('Bus · Train · Oslo');
+  await search.getByRole('button', { name: /Oslo S/ }).click();
 
   await expect
     .poll(() => transitBody)
@@ -1422,19 +1411,9 @@ test('transit stop search plans exact stops and starts guided transit', async ({
       },
     });
   await expect(page.locator('.transit-results')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Make this my commute' })).toHaveCount(0);
   await expect(page.locator('.transit-summary-departure')).toContainText('planned');
   await expect(page.locator('.transit-summary-departure')).toContainText('Live estimate uncertain');
-
-  // The planner, daily board and detailed journey are one connected flow: the
-  // exact stop ids survive saving, and the commute card can return to the
-  // standard trip view at the chosen departure.
-  await page.getByRole('button', { name: 'Make this my commute' }).click();
-  const commute = page.locator('.commute-panel');
-  await expect(commute).toContainText('Oslo S → Nationaltheatret');
-  // The card opens to its itinerary first; the planner is the step past it.
-  await commute.getByRole('button', { name: 'Details' }).first().click();
-  await commute.getByRole('button', { name: 'Open in planner' }).first().click();
-  await expect(page.locator('.transit-results')).toBeVisible();
 
   await page.context().grantPermissions(['notifications']);
   await page.getByRole('button', { name: 'Start journey' }).click();

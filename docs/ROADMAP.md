@@ -414,7 +414,7 @@ preserved is in ARCHITECTURE.md → *What stays as it is*.
 
 - [ ] **DR6 — Give Android one primary-surface state instead of independent sheet booleans.**
       Define a platform-specific `PrimarySurface` union with payload-bearing variants for menu,
-      search, Explore, Commute, Collections, Layers, Settings, and other mutually exclusive
+      search, Explore, Collections, Layers, Settings, and other mutually exclusive
       idle-map destinations. Keep navigation, transient prompts, and cards separate where they may
       genuinely coexist; do not combine this with DR2.
 

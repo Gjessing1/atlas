@@ -1,9 +1,0 @@
-<!--
-  From Android 12 the launcher publishes the corner radius it rounds widgets to,
-  and a card drawn with its own guess shows a light seam inside the cut corner.
-  `values-v31` takes the platform's; this is the fallback for everything older.
--->
-<resources>
-  <dimen name="atlas_widget_radius">20dp</dimen>
-  <dimen name="atlas_widget_inner_radius">8dp</dimen>
-</resources>

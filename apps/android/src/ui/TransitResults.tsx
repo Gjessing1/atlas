@@ -398,12 +398,10 @@ export function TransitResults({
   transit,
   onShowMap,
   onStartGuidance,
-  onMakeCommute,
 }: {
   transit: TransitPlan;
   onShowMap: (trip: TransitTrip, index: number) => void;
   onStartGuidance: (trip: TransitTrip) => void;
-  onMakeCommute?: () => void;
 }) {
   const [showFilters, setShowFilters] = useState(false);
   const board = useTransitBoard(transit);
@@ -500,12 +498,6 @@ export function TransitResults({
         </View>
       ) : null}
 
-      {trips && trips.length > 0 && onMakeCommute ? (
-        <Pressable style={styles.commuteButton} onPress={onMakeCommute} testID="transit-commute">
-          <Text style={styles.commuteButtonText}>Make this my commute</Text>
-        </Pressable>
-      ) : null}
-
       {trips && trips.length > 0 ? (
         <>
           {/* Absent, not disabled, when the planner has no earlier page: at the
@@ -576,14 +568,6 @@ const styles = StyleSheet.create({
   muted: { fontSize: 13, color: theme.textMuted },
   liveNotice: { fontSize: 11, color: theme.textMuted },
   link: { fontSize: 13, color: theme.accent, fontWeight: '600', paddingVertical: 4 },
-  commuteButton: {
-    alignSelf: 'flex-start',
-    borderRadius: 16,
-    backgroundColor: theme.surfaceActive,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-  },
-  commuteButtonText: { fontSize: 13, fontWeight: '700', color: theme.accent },
   error: { fontSize: 13, color: theme.danger },
   trip: {
     borderWidth: 1,

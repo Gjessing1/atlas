@@ -1,10 +1,4 @@
-import {
-  decodeMapLink,
-  decodePanelLink,
-  viewportBbox,
-  type AtlasPanel,
-  type LatLng,
-} from '@atlas/core';
+import { decodeMapLink, viewportBbox, type LatLng } from '@atlas/core';
 import { planFromHash, type PotentialView, type StoredRoutePlan } from '@atlas/app-hooks';
 import type { CameraRef } from '@maplibre/maplibre-react-native';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -90,17 +84,11 @@ export function parseCameraSetting(raw: string | null): MapView | null {
  * instead. Either way a pin in the link is handed to `onLinkPin` so the app can
  * show its card, and a route plan in it is published as `linkPlan`.
  *
- * A `#panel=` link is a different kind of request and handled separately: the
- * commute widget's tap opens the board without saying anything about the camera,
- * so it must not move the map. It rides here only because this hook already owns
- * the launch URL and the `url` subscription, and a second listener elsewhere
- * would handle every link twice.
  */
 export function useBootCamera(
   settings: BootCameraSettings,
   cameraRef: RefObject<CameraRef | null>,
   onLinkPin: (pin: LatLng) => void,
-  onLinkPanel?: (panel: AtlasPanel) => void,
 ): BootCamera {
   const { status, getSetting, setSetting } = settings;
   const [initialView, setInitialView] = useState<MapView | null>(null);
@@ -116,8 +104,6 @@ export function useBootCamera(
   // torn down and rebuilt whenever the app re-renders with a fresh callback.
   const onLinkPinRef = useRef(onLinkPin);
   onLinkPinRef.current = onLinkPin;
-  const onLinkPanelRef = useRef(onLinkPanel);
-  onLinkPanelRef.current = onLinkPanel;
 
   // Resolve the boot camera once storage has settled.
   useEffect(() => {
@@ -127,8 +113,6 @@ export function useBootCamera(
       const url = (await Linking.getInitialURL().catch(() => null)) ?? '';
       const launch = decodeMapLink(url);
       if (cancelled) return;
-      const panel = decodePanelLink(url);
-      if (panel) onLinkPanelRef.current?.(panel);
       // Always resolved, link or not: `undefined` is what holds the saved plan
       // back, so leaving it unset on the no-link path would strand the planner.
       setLinkPlan(launch?.route ? planFromHash(launch.route) : null);
@@ -148,8 +132,6 @@ export function useBootCamera(
   // #map= links arriving while the app is running: fly there, pin included.
   useEffect(() => {
     const sub = Linking.addEventListener('url', ({ url }) => {
-      const panel = decodePanelLink(url);
-      if (panel) onLinkPanelRef.current?.(panel);
       const view = decodeMapLink(url);
       if (!view) return;
       if (view.pin) onLinkPinRef.current(view.pin);

@@ -1,6 +1,0 @@
-{
-  "platforms": ["android"],
-  "android": {
-    "modules": ["io.gjessing.atlas.commutewidget.CommuteWidgetModule"]
-  }
-}

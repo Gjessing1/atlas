@@ -7,9 +7,6 @@ import {
   useRegionPackJobs,
   useMapStyleEditor,
   useMeasure,
-  useCommute,
-  plannedCommuteFromWaypoints,
-  routePlanFromCommute,
   routePlanState,
   useNavAddStop,
   useNavPrefs,
@@ -30,9 +27,7 @@ import {
   useThemeMode,
   type FetchNearbyFn,
   type ExploreArea,
-  type CommuteFn,
   type StandBoardRow,
-  type StopLinesFn,
   type PoiViewportFetch,
 } from '@atlas/app-hooks';
 import {
@@ -79,13 +74,7 @@ import {
   type RoutePath,
   type RoutingProfile,
 } from '@atlas/routing';
-import {
-  fetchTransitCommute,
-  fetchTransitCommuteSegments,
-  fetchTransitStopLines,
-  transitTripBounds,
-  type TransitTrip,
-} from '@atlas/transit';
+import { transitTripBounds, type TransitTrip } from '@atlas/transit';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Location from 'expo-location';
 import { StatusBar } from 'expo-status-bar';
@@ -94,7 +83,6 @@ import {
   Alert,
   Animated,
   Appearance,
-  AppState,
   BackHandler,
   Pressable,
   Share,
@@ -158,12 +146,6 @@ import { useAutoPackUpdate, usePackFreshness } from './src/regions/usePackFreshn
 import { geoExplore } from './src/search/geoExplore';
 import { SearchBar } from './src/search/SearchBar';
 import { useServerOrigin } from './src/serverOrigin';
-import {
-  configureCommuteWidgetV2,
-  readCommuteWidgetCommit,
-  reportCommutePlace,
-  setCommuteWidgetCommit,
-} from './src/commuteWidget';
 import { shareText } from './src/share';
 import { useSync } from './src/sync/useSync';
 import { useDirections } from './src/routing/useDirections';
@@ -178,8 +160,6 @@ import { CloudOffIcon, CrosshairIcon } from './src/ui/icons';
 import { useSideInsets } from './src/ui/insets';
 import { theme } from './src/ui/theme';
 import { MainMenuSheet } from './src/ui/MainMenuSheet';
-import { CommuteSheet } from './src/ui/CommuteSheet';
-import { useGeocode } from './src/ui/useGeocode';
 import { MeasureSheet } from './src/ui/MeasureSheet';
 import { MenuCluster } from './src/ui/MenuCluster';
 import { MapActivityControls } from './src/ui/MapActivityControls';
@@ -248,10 +228,6 @@ function AppInner() {
   const route = useRoute(vehicle.vehicle);
   const transitPreferences = useTransitPreferences(data);
   const transit = useTransitPlan(route, transitPreferences.value);
-  const plannedCommute = useMemo(
-    () => plannedCommuteFromWaypoints(route.waypoints),
-    [route.waypoints],
-  );
   // Reveal the position puck once any planner action has obtained a fix. This
   // includes the automatic "Directions" origin, not only the idle locate
   // button, so walking-route planning can show the live native compass.
@@ -329,7 +305,6 @@ function AppInner() {
     setSettingsOpen(true);
   }, []);
   const openVehicleSettings = useCallback(() => openSettings('navigation'), [openSettings]);
-  const [commuteOpen, setCommuteOpen] = useState(false);
   const [layersOpen, setLayersOpen] = useState(false);
   const [favoritesOpen, setFavoritesOpen] = useState(false);
   const [revealCollectionItem, setRevealCollectionItem] = useState<CollectionRevealTarget | null>(
@@ -354,123 +329,6 @@ function AppInner() {
   const [satelliteMinElevation, setSatelliteMinElevation] = useState(10);
   const [satelliteLocating, setSatelliteLocating] = useState(false);
   const [satelliteLocationError, setSatelliteLocationError] = useState(false);
-  const commuteFetch = useMemo<CommuteFn>(
-    () => async (query, signal, commit, onSegments) => {
-      if (query.via.length > 0 && onSegments) {
-        void fetchTransitCommuteSegments(query, { baseUrl: serverOrigin, signal })
-          .then(onSegments)
-          .catch(() => onSegments(null));
-      }
-      return fetchTransitCommute(query, { baseUrl: serverOrigin, signal, commit });
-    },
-    [serverOrigin],
-  );
-  // The commute board picks stops and lines with the same seams the route
-  // planner uses — one stop search, one line list, so the two cannot disagree
-  // about what a stop is.
-  const stopLinesFetch = useMemo<StopLinesFn>(
-    () => (stopId, signal) => fetchTransitStopLines(stopId, { baseUrl: serverOrigin, signal }),
-    [serverOrigin],
-  );
-  const commute = useCommute(data, data.places, commuteFetch, commuteOpen);
-  const makePlannedCommute = useCallback(() => {
-    if (!plannedCommute || !commute.ready) return;
-    commute.saveCommute(plannedCommute.config, plannedCommute.name);
-    route.stop();
-    setCommuteOpen(true);
-  }, [commute, plannedCommute, route]);
-  const openCommuteJourney = useCallback(
-    (trip: TransitTrip) => {
-      if (!commute.query) return;
-      route.restore(routePlanFromCommute(commute.query));
-      transit.prepareJourney(trip.startMs, commute.query.filter.modes);
-      transit.setEnabled(true);
-      setCommuteOpen(false);
-    },
-    [commute.query, route, transit],
-  );
-  // Only speak for the home-screen widget once the saved commute has actually
-  // been read. Every launch passes through `query === null` first, and handing
-  // that to the widget clears its stored question and blanks it to "Open Atlas
-  // to set up your commute" — for a moment normally, and permanently if the app
-  // is killed before storage answers. A widget's whole point is working without
-  // the app, so it must never be reset by the app merely starting.
-  useEffect(() => {
-    if (!commute.ready) return;
-    void configureCommuteWidgetV2(serverOrigin, commute.widgetQuery);
-  }, [commute.widgetQuery, commute.ready, serverOrigin]);
-  const widgetCommuteRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!commute.ready) return;
-    if (widgetCommuteRef.current === null) {
-      widgetCommuteRef.current = commute.widgetCommuteId;
-      return;
-    }
-    if (widgetCommuteRef.current === commute.widgetCommuteId) return;
-    widgetCommuteRef.current = commute.widgetCommuteId;
-    // A commitment identifies a journey inside the previous query. Carrying
-    // it across a deliberate widget-commute change could make the new board
-    // follow a similarly numbered service from the wrong corridor.
-    void setCommuteWidgetCommit(null);
-  }, [commute.ready, commute.widgetCommuteId]);
-  // TRANSIT.md §7's last piece: the journey the board tracks is the journey the
-  // widget tracks. Every *change* goes down, including a release, which clears
-  // every instance.
-  //
-  // Every change, and pointedly not the value the app started with. That value
-  // is not a decision — it is what was already on disk — and pushing it at
-  // launch would clear a commitment made by tapping the widget while the app
-  // was closed, before the read below could ever see it. A widget pinned after
-  // a commitment was made therefore starts untracked and catches up on the next
-  // tap, which is the right way round: TRANSIT.md §W3 forbids inventing a commitment,
-  // never withholding one.
-  const pushedCommitRef = useRef(false);
-  useEffect(() => {
-    if (!commute.ready) return;
-    // Looking at another saved commute must not retarget or clear the widget's
-    // tracked journey. Only the commute explicitly marked for the home screen
-    // shares this decision with native widget instances.
-    if (commute.activeId !== commute.widgetCommuteId) return;
-    if (!pushedCommitRef.current) {
-      pushedCommitRef.current = true;
-      return;
-    }
-    void setCommuteWidgetCommit(commute.commit);
-  }, [commute.activeId, commute.commit, commute.ready, commute.widgetCommuteId]);
-  // The other direction: a tap made on the *widget*, which happens on the home
-  // screen with the app in the background or gone. Read on every return to the
-  // foreground — not when the board opens, because Atlas comes back from the
-  // launcher with the sheet it left open and "the board opened" would never
-  // fire for the one journey that needs it.
-  //
-  // Adopted only when it is *newer* than what the board holds, and never the
-  // absence of one. That asymmetry is the load-bearing part: a released widget
-  // and a home screen with no v2 widget on it answer identically here (null),
-  // so adopting null would quietly drop the commitment of every user who has
-  // never pinned one.
-  const commitRef = useRef(commute.commit);
-  commitRef.current = commute.commit;
-  const setCommuteCommit = commute.setCommit;
-  useEffect(() => {
-    if (!commute.ready) return;
-    if (commute.activeId !== commute.widgetCommuteId) return;
-    let current = true;
-    const adopt = () => {
-      void readCommuteWidgetCommit().then((pinned) => {
-        if (!current || !pinned) return;
-        if ((pinned.committedAtMs ?? 0) <= (commitRef.current?.committedAtMs ?? 0)) return;
-        setCommuteCommit(pinned);
-      });
-    };
-    adopt();
-    const subscription = AppState.addEventListener('change', (state) => {
-      if (state === 'active') adopt();
-    });
-    return () => {
-      current = false;
-      subscription.remove();
-    };
-  }, [commute.activeId, commute.ready, commute.widgetCommuteId, setCommuteCommit]);
   // The measure / radius tool. While open it owns map taps — the same contract
   // web gives it — and its state is the shared useMeasure controller.
   const measure = useMeasure();
@@ -544,12 +402,7 @@ function AppInner() {
     setWeatherTarget((cur) => (cur ? { lat: pickedLat, lng: pickedLng } : cur));
   }, [pickedLat, pickedLng]);
   // Where the map opens, where it is now, and remembering that for next launch.
-  // The commute widget's tap arrives as `#panel=commute` — open the board it was
-  // showing, rather than dropping the user wherever the app was last.
-  const onLinkPanel = useCallback((panel: 'commute') => {
-    if (panel === 'commute') setCommuteOpen(true);
-  }, []);
-  const camera = useBootCamera(data, cameraRef, onLinkPin, onLinkPanel);
+  const camera = useBootCamera(data, cameraRef, onLinkPin);
   const { initialView, viewRef, mapZoom, getBias } = camera;
   const currentExploreArea = useMemo<ExploreArea | null>(() => {
     if (!camera.mapViewport) return null;
@@ -627,8 +480,6 @@ function AppInner() {
     origin: poiOrigin,
     refreshLive: refreshPoiList,
   });
-  // Stop search for the commute board's ends, biased to where the map is looking.
-  const stopGeocode = useGeocode(packs, getBias);
   // The half-built plan survives the app being killed in the background, and a
   // plan someone sent by link wins over it — the same hook, with the same
   // precedence, as the web app. It sits below useBootCamera because the
@@ -924,7 +775,6 @@ function AppInner() {
     exploreOpen ||
     menuOpen ||
     measure.open ||
-    commuteOpen ||
     dest.destination !== null ||
     satelliteSelection !== null ||
     offlineRegion !== null;
@@ -1559,19 +1409,10 @@ function AppInner() {
         center: [cur.coords.longitude, cur.coords.latitude],
         duration: 700,
       });
-      // TRANSIT.md §W2's cached coarse fix, written where a fix is already in hand:
-      // this is the app in the foreground with a position the user asked for, so
-      // it costs no extra permission and no extra battery. The v2 widget may use
-      // it to choose AUTO's *presentation* and nothing else — never the journey,
-      // the state or the committed leg — and it is ignored once stale.
-      void reportCommutePlace(commute.query, {
-        lat: cur.coords.latitude,
-        lng: cur.coords.longitude,
-      });
     } catch {
       // Location unavailable — nothing to recentre on.
     }
-  }, [commute.query, following, resumeFollow]);
+  }, [following, resumeFollow]);
 
   const useMapCenterForSatellite = useCallback(() => {
     const center = viewRef.current?.center ?? DEFAULT_VIEW.center;
@@ -2077,7 +1918,6 @@ function AppInner() {
               setExploreOpen(true);
             }}
             onOpenMeasure={() => measure.setOpen(true)}
-            onOpenCommute={() => setCommuteOpen(true)}
             onOpenSettings={() => openSettings()}
             bottomInset={bottomInset}
           />
@@ -2087,16 +1927,6 @@ function AppInner() {
           <MeasureSheet
             visible={measure.open && !planning && !navActive}
             measure={measure}
-            bottomInset={bottomInset}
-          />
-          <CommuteSheet
-            visible={commuteOpen && !planning && !navActive}
-            commute={commute}
-            places={data.places}
-            geocode={stopGeocode}
-            fetchStopLines={stopLinesFetch}
-            onClose={() => setCommuteOpen(false)}
-            onOpenJourney={openCommuteJourney}
             bottomInset={bottomInset}
           />
 
@@ -2231,7 +2061,6 @@ function AppInner() {
 
           <AppSheets
             data={data}
-            placeCommutes={commute.placeCommutes}
             sync={sync}
             garmin={garmin}
             packs={packs}
@@ -2349,14 +2178,6 @@ function AppInner() {
               onOpenGarminSettings={() => openSettings('account')}
               onShowTransitTrip={showTransitTrip}
               onStartTransitGuidance={startTransitGuidance}
-              onMakeCommute={
-                plannedCommute &&
-                commute.ready &&
-                (commute.canAddCommute ||
-                  (commute.commutes.length === 1 && !commute.config.from && !commute.config.to))
-                  ? makePlannedCommute
-                  : undefined
-              }
               getMyLocation={directions.getMyLocation}
               locatingOrigin={directions.locatingOrigin}
               bottomInset={bottomInset}

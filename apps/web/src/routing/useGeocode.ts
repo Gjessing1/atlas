@@ -9,10 +9,7 @@ import { useCallback } from 'react';
  * looking. Browsing for stops *on the route* does not come through here — it is
  * a category query against the explore endpoint (see AlongRouteStops).
  *
- * Lives in its own module because the route planner is no longer the only
- * surface that picks a stop: the commute board's From / Via / To use the same
- * seam, and a second copy of "rank Entur stops ahead of addresses" is how the
- * two would start disagreeing about what a stop is.
+ * The planner shares this stop-first ranking across its search controls.
  */
 export function useGeocode(getBias: () => LatLng | null): StopGeocodeFn {
   return useCallback(

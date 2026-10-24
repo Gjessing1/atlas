@@ -928,67 +928,6 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     },
     note: 'Both clients continue from the immutable journey snapshot when the network disappears. Android schedules the alight warning with AlarmManager so it survives backgrounding; browsers only guarantee the Notification timer while the Atlas tab remains alive.',
   },
-  {
-    id: 'planner-commute-board',
-    surface: 'planner',
-    capability: 'Named two-way commutes between stops, with one chosen for the home-screen widget',
-    hook: 'useCommuteEditor',
-    // The seam, not a spelling. This row used to resolve the sentence
-    // "Favorite-to-favorite live journeys" inside two hand-written forms — which
-    // stayed green while the deployed server had no endpoint to answer them, and
-    // said nothing about the two forms already wording their rules differently.
-    // Now each side has to be built on the shared editor to pass.
-    web: { file: 'apps/web/src/transit/CommutePanel.tsx', contains: 'useCommuteEditor' },
-    android: { file: 'apps/android/src/ui/CommuteSheet.tsx', contains: 'useCommuteEditor' },
-    route: { file: 'backend/src/transit-api.ts', contains: "'/api/transit/commute'" },
-    note: 'Reached from the web topbar and Android’s main menu — the same idiom split every other panel already follows. The named library is one synced setting (`transit.commute`), so both clients share every commute and the explicit widget choice.',
-  },
-  {
-    id: 'planner-commute-dashboard',
-    surface: 'planner',
-    capability:
-      'The commute as a dashboard: what leaving now gets you, whole journeys with their connections, and the change read as a departure board',
-    hook: 'useCommuteDashboard',
-    web: { file: 'apps/web/src/transit/CommutePanel.tsx', contains: 'useCommuteDashboard' },
-    android: { file: 'apps/android/src/ui/CommuteSheet.tsx', contains: 'useCommuteDashboard' },
-    route: { file: 'backend/src/transit-api.ts', contains: 'commuteSegmentQueries' },
-    note: 'docs/TRANSIT.md. The marker is the shared controller, not a phrase: the two surfaces used to be hand-written result lists that already disagreed about which time to print (the delayed one on both, which is the wrong one). Every clock time, status, connection and countdown now comes from @atlas/transit, so the panel, the sheet and the home-screen widget cannot quote three different departures for one bus.',
-  },
-  {
-    id: 'planner-commute-tracking',
-    surface: 'planner',
-    capability: 'Track the journey you are on, and see where in it you are',
-    hook: 'useCommuteDashboard',
-    web: { file: 'apps/web/src/transit/CommutePanel.tsx', contains: 'HereCard' },
-    android: { file: 'apps/android/src/ui/CommuteSheet.tsx', contains: 'HereCard' },
-    route: { file: 'backend/src/transit-api.ts', contains: 'committedAnswer' },
-    note: 'TRANSIT.md §7. The phase ladder, the connection break and the commitment all shipped in v0.182.0 for the *home-screen widget*, whose only consumer is the backend widget route — so the widget knew which leg you were on and the board, the surface you open once you are moving, did not. The commitment is one `local.` setting (never syncs: "the journey I am on" is the least portable fact this app holds) and the board asks for that journey by name, because a board asked "from now" cannot contain one that has already left. That is also why the card carries the journey’s legs: tracking otherwise shows strictly *less* than not tracking, since the leg list — platforms included — is only reachable by expanding a row in a list the tracked journey has fallen out of. On Android the commitment is one fact with two hands on it: `setCommitV2` pushes the board’s onto every v2 widget instance and `commitV2` reports back a tap made on the home screen, adopted only when newer and never as an absence.',
-  },
-  {
-    id: 'planner-commute-lines',
-    surface: 'planner',
-    capability: 'Pick the commute’s lines from what actually calls at your stops',
-    hook: 'useCommuteEditor',
-    web: { file: 'apps/web/src/transit/CommutePanel.tsx', contains: 'fetchTransitStopLines' },
-    android: { file: 'apps/android/App.tsx', contains: 'fetchTransitStopLines' },
-    route: { file: 'backend/src/transit-api.ts', contains: "'/api/transit/stop-lines'" },
-    note: 'A line is ticked, never typed: a `publicCode` matches three lines nationally, so the saved commute stores Entur line ids and shows codes. Android builds the seam in App.tsx (it needs the server origin); web can default to same-origin inside the panel.',
-  },
-  {
-    id: 'planner-commute-widget-v2',
-    surface: 'planner',
-    capability: 'The whole commute on one home-screen widget, following the leg you are on',
-    web: null,
-    android: {
-      file: 'apps/android/modules/commutewidget/android/src/main/java/io/gjessing/atlas/commutewidget/v2/CommuteWidgetV2Provider.kt',
-      contains: 'atlas_commute_v2_widget',
-    },
-    // The widget renders nothing it computes itself, so without this route it is
-    // a permanent "Couldn't refresh".
-    route: { file: 'backend/src/transit-api.ts', contains: 'commuteWidgetV2Board' },
-    why: 'Android-only by nature: a browser has nowhere to put a home-screen widget. docs/TRANSIT.md §W1–§W7: one widget pins the whole commute, with both directions behind a compact selector and content that follows where you are in the journey. A tap on a row commits to a journey, the operator’s own published departure and arrival records place you inside it, the clock takes over where they are silent, and only then does the time of day decide. No location permission, no activity recognition; a cached coarse fix may choose AUTO’s presentation and nothing else.',
-  },
-
   // ---------------------------------------------------------- navigation ---
   {
     id: 'nav-guidance',

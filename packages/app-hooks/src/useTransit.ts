@@ -64,8 +64,6 @@ export interface TransitPlanner {
   toggleMode: (mode: TransitMode) => void;
   /** Accept every mode again — the way out of an over-filtered empty result. */
   clearModes: () => void;
-  /** Open a known journey's departure window with the commute's mode filter. */
-  prepareJourney: (departureMs: number, modes?: readonly TransitMode[]) => void;
   /** Re-ask with the same query — the answer decays, so this is a real action, not a retry. */
   refresh: () => void;
   /**
@@ -222,16 +220,6 @@ export function useTransit(
       return next.length === 0 ? current : next;
     });
   }, []);
-  const prepareJourney = useCallback(
-    (departureMs: number, nextModes: readonly TransitMode[] = []) => {
-      setCursor(null);
-      setTimeMsState(departureMs);
-      setArriveByState(false);
-      setModes([...nextModes]);
-    },
-    [],
-  );
-
   const pageEarlier = useCallback(() => {
     if (pages.previous) setCursor(pages.previous);
   }, [pages.previous]);
@@ -253,7 +241,6 @@ export function useTransit(
     modes,
     toggleMode,
     clearModes,
-    prepareJourney,
     refresh,
     pageEarlier: pages.previous ? pageEarlier : null,
     pageLater: pages.next ? pageLater : null,

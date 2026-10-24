@@ -328,11 +328,9 @@ function toLocalInput(ms: number): string {
 export function TransitResults({
   transit,
   onStartGuidance,
-  onMakeCommute,
 }: {
   transit: TransitPlan;
   onStartGuidance: (trip: TransitTrip) => void;
-  onMakeCommute?: () => void;
 }) {
   const [showFilters, setShowFilters] = useState(false);
   const board = useTransitBoard(transit);
@@ -424,11 +422,6 @@ export function TransitResults({
             </>
           )}
         </p>
-      )}
-      {trips && trips.length > 0 && onMakeCommute && (
-        <button type="button" className="transit-save-commute" onClick={onMakeCommute}>
-          Make this my commute
-        </button>
       )}
       {trips && trips.length > 0 && (
         <>

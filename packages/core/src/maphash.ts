@@ -124,42 +124,12 @@ export function decodeMapHash(hash: string): MapViewState | null {
 }
 
 /**
- * A panel a link can ask a client to open, independently of any map view.
- *
- * `#panel=commute` exists because the Android home-screen widget has to open the
- * board it is showing — a bare launch intent drops you wherever the app was last,
- * which for a widget you tapped to see the next bus is the wrong screen. Both
- * clients read it, so the same URL opens the same board in a browser and on a
- * phone, and the widget builds it as a plain string rather than owning a codec.
- */
-export type AtlasPanel = 'commute';
-
-const PANELS: readonly AtlasPanel[] = ['commute'];
-
-/** The hash that opens a panel: `"#panel=commute"`. */
-export function panelHash(panel: AtlasPanel): string {
-  return `#panel=${panel}`;
-}
-
-/**
  * Everything after the `#`, or — for a scheme link with no explicit fragment —
  * everything after the scheme, so `atlas://map=…` reads like `#map=…`.
  */
 function fragmentOf(url: string): string {
   const hashIndex = url.indexOf('#');
   return hashIndex >= 0 ? url.slice(hashIndex) : '#' + url.replace(/^[a-z+.-]+:\/{0,2}/i, '');
-}
-
-/**
- * Read a panel request out of a hash or a full deep link. Unlike
- * {@link decodeMapLink} this does not need a `map=` fragment: "open the commute
- * board" says nothing about where the camera should be, and moving it would be a
- * side effect nobody asked for.
- */
-export function decodePanelLink(url: string): AtlasPanel | null {
-  const match = /(?:^|[#&?])panel=([a-z]+)/.exec(fragmentOf(url));
-  const panel = match?.[1];
-  return panel && PANELS.includes(panel as AtlasPanel) ? (panel as AtlasPanel) : null;
 }
 
 /**

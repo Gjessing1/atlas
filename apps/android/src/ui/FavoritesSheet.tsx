@@ -484,7 +484,6 @@ export function FavoritesSheet({
   onRevealed,
   onClose,
   places,
-  placeCommutes = new Map(),
   tracks,
   collections,
   pinLabels,
@@ -520,8 +519,6 @@ export function FavoritesSheet({
   onRevealed?: () => void;
   onClose: () => void;
   places: PlaceRecord[];
-  /** Commutes that use each saved place as an end. */
-  placeCommutes?: ReadonlyMap<string, readonly string[]>;
   tracks: TrackRecord[];
   collections: CollectionRecord[];
   /** Which folders and tags draw their pins' names on the map. */
@@ -839,11 +836,6 @@ export function FavoritesSheet({
               {folderName ? `${folderName} · ` : ''}
               {place.address || `${place.lat.toFixed(4)}, ${place.lng.toFixed(4)}`}
             </Text>
-            {placeCommutes.has(place.id) ? (
-              <Text style={styles.commuteBadge} numberOfLines={1}>
-                Commute · {placeCommutes.get(place.id)!.join(', ')}
-              </Text>
-            ) : null}
             <TagChips tags={place.tags} onPick={setFilter} />
           </Pressable>
           <Pressable
@@ -1884,7 +1876,6 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   muted: { fontSize: 13, color: theme.textMuted, marginTop: 2 },
-  commuteBadge: { color: theme.accent, fontSize: 11, fontWeight: '700', marginTop: 2 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
   rowRevealed: { backgroundColor: theme.accentFaint, borderRadius: 8 },
   rowHidden: { opacity: 0.45 },
