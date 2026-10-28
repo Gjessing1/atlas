@@ -1,4 +1,4 @@
-# Deploy from /home/gjessing/docker/atlas (compose + .env live there).
+# Deploy from /home/gjessing/docker/Productivity/atlas (compose + .env live there).
 # Persistent data is bind-mounted from the host at /mnt/data/atlas so it survives redeploys.
 services:
   backend:
