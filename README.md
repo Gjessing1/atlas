@@ -3,6 +3,12 @@
 A self-hosted, offline-first mapping and navigation platform (OsmAnd-inspired) for **Android +
 Web**, built on OpenStreetMap data. The web app is also a first-class citizen.
 
+## Android screenshots
+
+| Explore the map                                                                                                                      | Plan a route                                                                                                                                             | Choose map layers                                                                                                           |
+| ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| <img src="assets/screenshots/android/map.png" alt="Atlas on Android showing the map of central Oslo and map controls" width="240" /> | <img src="assets/screenshots/android/route-planning.png" alt="Atlas on Android showing a planned route with its distance and travel time" width="240" /> | <img src="assets/screenshots/android/map-layers.png" alt="Atlas on Android showing the available map layers" width="240" /> |
+
 ## Tech stack
 
 - **Monorepo** (npm workspaces): `apps/web`, `apps/android`, `backend/`, `packages/*` (shared

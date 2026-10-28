@@ -271,10 +271,14 @@ before that destination. Also:
   `…-sheet-handle` can never put a sheet back at peek; only a downward drag does. The POI list is
   reached by one tap on `poi-list-sheet-handle`, and the regression gets the map controls back by
   opening a place card (which unmounts the sheet) and closing it, so it remounts at peek.
-- **The AVD draws no MapLibre symbol text.** Place names, wind arrows and temperature numbers are
-  invisible here. Rasters, fills, circles and ordinary React Native views render and screenshot
-  normally, so verify a symbol layer on a real device or through a temporary `circle` layer on
-  the same source.
+- **The default AVD renderer draws no MapLibre symbol text.** Place names, wind arrows and
+  temperature numbers are invisible with `swiftshader_indirect`. Rasters, fills, circles and
+  ordinary React Native views render and screenshot normally. For documentation screenshots,
+  start the emulator with `apps/android/e2e/start-emulator.sh -gpu swangle`: the later GPU flag
+  overrides the default, and this renderer showed street and place labels on 2026-10-28. Wait for
+  the app and map to finish loading before capturing. The regression keeps its default renderer;
+  verify other symbol layers on a real device or through a temporary `circle` layer on the same
+  source.
 - **MapLibre ViewAnnotations are visible in screenshots but absent from UiAutomator's tree.** The
   v0.255.0 release candidate showed its route point and line correctly, yet neither
   `route-map-point-*` testID appeared in the worker's window dump. Do not wait for or tap those IDs
