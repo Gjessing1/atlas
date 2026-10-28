@@ -56,4 +56,7 @@ infrastructure/     Docker/compose setup for Valhalla, Photon, Postgres, tile bu
 
 ## License
 
-Not yet decided.
+Copyright (c) 2026 Lars Gjessing. All rights reserved. The source is public for
+inspection; reuse requires prior written permission. See [LICENSE](LICENSE).
+Third-party components and data, including OpenStreetMap data, retain their own
+licenses and terms.
