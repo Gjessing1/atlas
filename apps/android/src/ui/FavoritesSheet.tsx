@@ -5,6 +5,8 @@ import {
   libraryVisibility,
   isQuickAccess,
   quickAccessTags,
+  quickAccessTiles,
+  libraryOnMapCount,
   type LibraryPlaceSort,
   type LibraryTrackSort,
   ancestorFolderIds,
@@ -37,7 +39,6 @@ import {
   folderHasPinLabels,
   garminSportIcon,
   tagHasPinLabels,
-  visibleOnMap,
   type CollectionRevealTarget,
 } from '@atlas/core';
 import type {
@@ -64,8 +65,9 @@ import { flattenFolders } from './folders';
 import { confirmDelete, ItemEditor } from './ItemEditor';
 import { ReorderableList } from './ReorderableList';
 import { PinLabelIcon } from './icons';
-import { ActionMenu, FilterMenu } from './FilterMenu';
+import { ActionMenu, ActionSheet, FilterMenu, type MenuAction } from './FilterMenu';
 import { GarminCourses } from './GarminCourses';
+import { DirectionsIcon, FolderIcon, FolderPlusIcon, LayersIcon, MapPinIcon } from './modeIcons';
 import { theme } from './theme';
 
 /** Tracks a folder level draws before its "Show more" button. */
@@ -531,7 +533,9 @@ export function FavoritesSheet({
   collections: CollectionRecord[];
   /** Which folders and tags draw their pins' names on the map. */
   pinLabels: PinLabelsController;
+  /** Reveal a place on the map with its card — what tapping a row or a tile does. */
   onFlyTo: (place: PlaceRecord) => void;
+  /** Plan a route there now: a Quick access tile's arrow, or a row's Directions. */
   onNavigate: (place: PlaceRecord) => void;
   /** Patch a place (the editor batches its fields behind an explicit Save). */
   onPatch: (id: string, patch: EditablePlacePatch) => void;
@@ -593,6 +597,11 @@ export function FavoritesSheet({
   const [trackLimit, setTrackLimit] = useState(TRACK_PAGE);
   const [placeLimit, setPlaceLimit] = useState(PLACE_PAGE);
   const [highlighted, setHighlighted] = useState<string | null>(null);
+  // The long-pressed row's actions (or Manage's), in one sheet for the whole list.
+  const [menu, setMenu] = useState<{ title: string; actions: MenuAction[] } | null>(null);
+  // Quick access: removing shortcuts is its own mode, and past six the rest fold away.
+  const [quickEditing, setQuickEditing] = useState(false);
+  const [quickExpanded, setQuickExpanded] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const revealRowRef = useRef<View>(null);
   const scrollY = useRef(0);
@@ -630,6 +639,7 @@ export function FavoritesSheet({
     setTrackLimit(TRACK_PAGE);
     setPlaceLimit(PLACE_PAGE);
     setAddingFolder(false);
+    setQuickEditing(false);
     scrollRef.current?.scrollTo({ y: 0, animated: false });
   };
 
@@ -642,6 +652,7 @@ export function FavoritesSheet({
     setTrackLimit(TRACK_PAGE);
     setPlaceLimit(PLACE_PAGE);
     setEditingKey(null);
+    setQuickEditing(false);
     scrollRef.current?.scrollTo({ y: 0, animated: false });
   };
 
@@ -667,13 +678,16 @@ export function FavoritesSheet({
 
   // What the list is narrowed to — name, tag, notes or address, with a
   // leading `#` meaning tags alone, which is what a tapped tag chip writes.
+  // On Places a search finds folders and places, wherever the user is standing
+  // (top level, a folder or All places); tracks are found on their own tabs.
+  const placesTab = view === 'folders' || view === 'places';
   const filtered = useMemo(
     () =>
       filterCollectionRecords(
-        { collections, places, tracks: view === 'places' ? [] : tracks },
+        { collections, places, tracks: placesTab && filter.trim() ? [] : tracks },
         filter,
       ),
-    [collections, places, tracks, filter, view],
+    [collections, places, tracks, filter, placesTab],
   );
   const viewSource = useMemo(
     () => libraryTracks(tracks, view === 'activities' ? 'activities' : 'courses', null, null),
@@ -691,11 +705,10 @@ export function FavoritesSheet({
     [filtered.tracks, view, sport, year, trackSort],
   );
   const sports = useMemo(() => librarySportCounts(viewSource), [viewSource]);
-  // A listed track the map does not draw, by its own eye or a hidden folder above it.
-  const listedHidden = useMemo(() => {
-    const drawn = new Set(visibleOnMap(tracks, collections).map((track) => track.id));
-    return viewTracks.some((track) => !drawn.has(track.id));
-  }, [viewTracks, tracks, collections]);
+  const onMap = useMemo(
+    () => libraryOnMapCount(viewTracks, tracks, collections),
+    [viewTracks, tracks, collections],
+  );
   const years = useMemo(() => activityYearCounts(viewSource), [viewSource]);
   // Tab counts are of everything saved, so a filter typed on one tab does not
   // make another look empty.
@@ -818,10 +831,49 @@ export function FavoritesSheet({
     return false;
   };
 
-  const toggleEditing = (key: string) => setEditingKey((cur) => (cur === key ? null : key));
+  /** A place's occasional actions — a long-press away, never a button on every row. */
+  const placeActions = (place: PlaceRecord): MenuAction[] => [
+    {
+      label: 'Directions',
+      onPress: () => {
+        onNavigate(place);
+        onClose();
+      },
+      testID: `favorite-nav-${place.id}`,
+    },
+    {
+      label: 'Edit place',
+      onPress: () => setEditingKey(`place:${place.id}`),
+      testID: `favorite-edit-${place.id}`,
+    },
+    {
+      label: isQuickAccess(place) ? 'Remove from Quick access' : 'Pin to Quick access',
+      onPress: () => onPatch(place.id, { tags: quickAccessTags(place) }),
+      testID: `favorite-quick-${place.id}`,
+    },
+    {
+      label: 'Delete place…',
+      danger: true,
+      onPress: () =>
+        confirmDelete(
+          `Delete “${libraryPlaceName(place)}”?`,
+          'You can undo this right after.',
+          () => onDelete(place.id),
+        ),
+      testID: `favorite-delete-${place.id}`,
+    },
+  ];
 
+  /**
+   * A place row: its pin, name and where it is filed, and the eye. Tapping reveals it on the
+   * map with its card, from which navigating is an explicit choice; holding it offers the
+   * rest. While reordering, holding drags instead — and the empty long-press keeps the
+   * release from also counting as a tap.
+   */
   const placeRow = (place: PlaceRecord, handle: ReactNode): ReactNode => {
     const key = `place:${place.id}`;
+    const name = libraryPlaceName(place);
+    const mapState = libraryVisibility(place, collections);
     return (
       <View>
         <View
@@ -830,68 +882,42 @@ export function FavoritesSheet({
         >
           {handle}
           <Pressable
-            style={[styles.badge, { backgroundColor: place.color }]}
-            onPress={() => toggleEditing(key)}
-            testID={`favorite-style-${place.id}`}
-          >
-            <Text style={styles.badgeIcon}>{place.icon}</Text>
-          </Pressable>
-          <Pressable
-            style={styles.rowMain}
+            style={styles.rowPress}
             onPress={() => {
               onFlyTo(place);
               onClose();
             }}
-            onLongPress={() => {}}
+            onLongPress={
+              reordering ? () => {} : () => setMenu({ title: name, actions: placeActions(place) })
+            }
+            accessibilityHint="Shows it on the map. Long-press for more actions."
             testID={`favorite-${place.id}`}
           >
-            <Text style={styles.rowText} numberOfLines={2}>
-              {libraryPlaceName(place)}
-            </Text>
-            <Text style={styles.muted} numberOfLines={1}>
-              {libraryPlaceLine(place, collections)}
-            </Text>
-            <Text style={styles.mapState}>{libraryVisibility(place, collections)}</Text>
-            <TagChips
-              tags={place.tags.filter((tag) => tag !== 'quick-access')}
-              onPick={setFilter}
-            />
+            <View style={[styles.badge, { backgroundColor: place.color }]}>
+              <Text style={styles.badgeIcon}>{place.icon}</Text>
+            </View>
+            <View style={styles.rowMain}>
+              <Text style={styles.rowText} numberOfLines={2}>
+                {name}
+              </Text>
+              <Text style={styles.muted} numberOfLines={1}>
+                {libraryPlaceLine(place, collections)}
+              </Text>
+              <TagChips
+                tags={place.tags.filter((tag) => tag !== 'quick-access')}
+                onPick={setFilter}
+              />
+            </View>
           </Pressable>
           <Pressable
             style={styles.eyeButton}
             onPress={() => onPatch(place.id, { visible: !place.visible })}
             accessibilityRole="button"
-            accessibilityLabel={`${place.visible ? 'Hide' : 'Show'} ${place.name} on map. ${libraryVisibility(place, collections)}`}
+            accessibilityLabel={`${place.visible ? 'Hide' : 'Show'} ${place.name} on map. ${mapState}`}
             accessibilityState={{ selected: place.visible }}
             testID={`favorite-visible-${place.id}`}
           >
-            <EyeIcon off={libraryVisibility(place, collections) !== 'On map'} />
-          </Pressable>
-          <ActionMenu
-            title={libraryPlaceName(place)}
-            testID={`favorite-more-${place.id}`}
-            actions={[
-              {
-                label: 'Edit place',
-                onPress: () => toggleEditing(key),
-                testID: `favorite-edit-${place.id}`,
-              },
-              {
-                label: isQuickAccess(place) ? 'Remove from Quick access' : 'Pin to Quick access',
-                onPress: () => onPatch(place.id, { tags: quickAccessTags(place) }),
-                testID: `favorite-quick-${place.id}`,
-              },
-            ]}
-          />
-          <Pressable
-            style={styles.button}
-            onPress={() => {
-              onNavigate(place);
-              onClose();
-            }}
-            testID={`favorite-nav-${place.id}`}
-          >
-            <Text style={styles.buttonText}>Go</Text>
+            <EyeIcon off={mapState !== 'On map'} />
           </Pressable>
         </View>
         {editingKey === key ? (
@@ -917,56 +943,88 @@ export function FavoritesSheet({
     );
   };
 
+  /** A track's actions, behind a long-press like a place's. */
+  const trackActions = (track: TrackRecord): MenuAction[] => [
+    {
+      label: 'Edit',
+      onPress: () => setEditingKey(`track:${track.id}`),
+      testID: `track-edit-${track.id}`,
+    },
+    {
+      label: 'Plan route',
+      onPress: () => {
+        onPlanTrack(track);
+        onClose();
+      },
+      testID: `track-plan-${track.id}`,
+    },
+    {
+      label: 'Export GPX',
+      onPress: () => onExportTrack(track.id, 'gpx'),
+      testID: `track-export-gpx-${track.id}`,
+    },
+    {
+      label: 'Export KML',
+      onPress: () => onExportTrack(track.id, 'kml'),
+      testID: `track-export-kml-${track.id}`,
+    },
+    {
+      label: 'Delete…',
+      danger: true,
+      onPress: () =>
+        confirmDelete(`Delete “${track.name}”?`, 'You can undo this right after.', () =>
+          onDeleteTrack(track.id),
+        ),
+      testID: `track-delete-${track.id}`,
+    },
+  ];
+
   /**
-   * A track row — the same shape as a place row minus the pin styling, and
-   * without a drag handle: tracks have no stored order to arrange (web can't
-   * drag them either). The name frames the track on the map, ✎ opens the same
-   * editor a place gets, plus GPX/KML export.
+   * A track row: sport, name, the one line that answers "which one was it", and the eye.
+   * Tapping frames it and opens its profile; holding offers edit, plan and export. Tracks
+   * have no stored order to arrange, so there is no drag handle.
    */
   const trackRow = (track: TrackRecord): ReactNode => {
     const key = `track:${track.id}`;
+    const mapState = libraryVisibility(track, collections);
     return (
       <View key={key}>
         <View
           ref={highlighted === key ? revealRowRef : undefined}
           style={[styles.row, highlighted === key ? styles.rowRevealed : null]}
         >
-          <View style={styles.trackIconBox}>
-            <Text style={styles.trackIcon}>{garminSportIcon(libraryTrackSport(track))}</Text>
-          </View>
           <Pressable
-            style={styles.rowMain}
+            style={styles.rowPress}
             onPress={() => {
               onShowTrack(track);
               onClose();
             }}
+            onLongPress={() => setMenu({ title: track.name, actions: trackActions(track) })}
+            accessibilityHint="Shows it on the map. Long-press for more actions."
             testID={`track-${track.id}`}
           >
-            <Text style={styles.rowText} numberOfLines={2}>
-              {track.name}
-            </Text>
-            <Text style={styles.muted} numberOfLines={1}>
-              {libraryTrackLine(track)}
-            </Text>
-            <Text style={styles.mapState}>{libraryVisibility(track, collections)}</Text>
-            <TagChips tags={libraryTrackTags(track)} onPick={setFilter} />
+            <View style={styles.trackIconBox}>
+              <Text style={styles.trackIcon}>{garminSportIcon(libraryTrackSport(track))}</Text>
+            </View>
+            <View style={styles.rowMain}>
+              <Text style={styles.rowText} numberOfLines={2}>
+                {track.name}
+              </Text>
+              <Text style={styles.muted} numberOfLines={1}>
+                {libraryTrackLine(track)}
+              </Text>
+              <TagChips tags={libraryTrackTags(track)} onPick={setFilter} />
+            </View>
           </Pressable>
           <Pressable
             style={styles.eyeButton}
             onPress={() => onPatchTrack(track.id, { visible: !track.visible })}
             accessibilityRole="button"
-            accessibilityLabel={`${track.visible ? 'Hide' : 'Show'} ${track.name} on map. ${libraryVisibility(track, collections)}`}
+            accessibilityLabel={`${track.visible ? 'Hide' : 'Show'} ${track.name} on map. ${mapState}`}
             accessibilityState={{ selected: track.visible }}
             testID={`track-visible-${track.id}`}
           >
-            <EyeIcon off={libraryVisibility(track, collections) !== 'On map'} />
-          </Pressable>
-          <Pressable
-            style={[styles.button, styles.buttonQuiet]}
-            onPress={() => toggleEditing(key)}
-            testID={`track-edit-${track.id}`}
-          >
-            <Text style={styles.buttonQuietText}>✎</Text>
+            <EyeIcon off={mapState !== 'On map'} />
           </Pressable>
         </View>
         {editingKey === key ? (
@@ -980,34 +1038,6 @@ export function FavoritesSheet({
             tags={track.tags}
             folders={flatFolders}
             tagSuggestions={tagSuggestions}
-            actions={
-              <>
-                <Pressable
-                  style={[styles.button, styles.buttonQuiet]}
-                  onPress={() => {
-                    onPlanTrack(track);
-                    onClose();
-                  }}
-                  testID={`track-plan-${track.id}`}
-                >
-                  <Text style={styles.buttonQuietText}>Plan route</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.button, styles.buttonQuiet]}
-                  onPress={() => onExportTrack(track.id, 'gpx')}
-                  testID={`track-export-gpx-${track.id}`}
-                >
-                  <Text style={styles.buttonQuietText}>GPX</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.button, styles.buttonQuiet]}
-                  onPress={() => onExportTrack(track.id, 'kml')}
-                  testID={`track-export-kml-${track.id}`}
-                >
-                  <Text style={styles.buttonQuietText}>KML</Text>
-                </Pressable>
-              </>
-            }
             onSave={(patch) => onPatchTrack(track.id, patch)}
             onDelete={() => onDeleteTrack(track.id)}
             onClose={() => setEditingKey(null)}
@@ -1056,7 +1086,7 @@ export function FavoritesSheet({
           shown.map((place) => <View key={place.id}>{placeRow(place, null)}</View>)
         ) : (
           <ReorderableList
-            holdToDrag={editingKey === null}
+            holdToDrag={reordering && editingKey === null}
             showHandles={reordering && !filtered.active}
             items={shown}
             keyOf={(place) => place.id}
@@ -1116,18 +1146,18 @@ export function FavoritesSheet({
           onLongPress={() => {}}
           testID={`folder-open-${folder.id}`}
         >
-          <Text style={styles.folderIcon}>📁</Text>
+          <View style={styles.rowIcon}>
+            <FolderIcon color={theme.icon} />
+          </View>
           <View style={styles.rowMain}>
             <Text style={styles.rowText} numberOfLines={2}>
               {folder.name}
             </Text>
+            {/* What it holds, not whether it is drawn: the eye beside it says that, and
+                hiding a folder never changes what is filed in it. */}
             <Text style={styles.muted} numberOfLines={1}>
               {path.length > 0 ? `${path.join(' › ')} · ` : ''}
-              {node ? folderContentsLine(node) : ''} ·{' '}
-              {libraryVisibility(
-                { visible: folder.visible, collectionId: folder.parentId },
-                collections,
-              )}
+              {node ? folderContentsLine(node) : ''}
             </Text>
           </View>
         </Pressable>
@@ -1136,7 +1166,7 @@ export function FavoritesSheet({
           onPress={() => onSetFolderVisible(folder.id, !folder.visible)}
           accessibilityRole="button"
           accessibilityState={{ selected: folder.visible }}
-          accessibilityLabel={`${folder.visible ? 'Hide' : 'Show'} ${folder.name} on the map`}
+          accessibilityLabel={`${folder.visible ? 'Hide' : 'Show'} ${folder.name} on the map. ${libraryVisibility({ visible: folder.visible, collectionId: folder.parentId }, collections)}`}
           testID={`folder-visible-${folder.id}`}
         >
           <EyeIcon off={!node?.visible} />
@@ -1150,7 +1180,7 @@ export function FavoritesSheet({
     if (level.length === 0) return null;
     return (
       <ReorderableList
-        holdToDrag={editingKey === null}
+        holdToDrag={reordering && editingKey === null}
         showHandles={reordering && !filtered.active}
         items={level}
         keyOf={(folder) => folder.id}
@@ -1210,11 +1240,7 @@ export function FavoritesSheet({
           />
         ) : (
           <Text style={styles.muted} testID="collections-folder-title">
-            {above.length ? above.map((item) => item.name).join(' › ') : 'Places'} ·{' '}
-            {libraryVisibility(
-              { visible: folder.visible, collectionId: folder.parentId },
-              collections,
-            )}
+            {above.length ? above.map((item) => item.name).join(' › ') : 'Places'}
           </Text>
         )}
       </View>
@@ -1279,53 +1305,194 @@ export function FavoritesSheet({
     </View>
   );
 
-  /** One folder level: its subfolders, a new-folder field, then what is filed in it. */
+  /**
+   * Quick access: a few personal shortcuts as tiles, two to a row. A tile shows the place on
+   * the map; its arrow plans the way there in one tap. Pinning is a tag on the place itself,
+   * so a shortcut stays filed in its folder and is never a second copy.
+   */
+  const quickAccess = (): ReactNode => {
+    const { shown, more } = quickAccessTiles(places, quickExpanded);
+    const editing = quickEditing && shown.length > 0;
+    return (
+      <View testID="quick-access">
+        <View style={styles.sectionHead}>
+          <Text style={styles.sectionTitle}>Quick access</Text>
+          {shown.length > 0 ? (
+            <Pressable
+              onPress={() => setQuickEditing((value) => !value)}
+              hitSlop={10}
+              accessibilityRole="button"
+              testID="quick-edit"
+            >
+              <Text style={styles.link}>{editing ? 'Done' : 'Edit'}</Text>
+            </Pressable>
+          ) : null}
+        </View>
+        {shown.length === 0 ? (
+          <Text style={styles.muted}>
+            Long-press a saved place and pin it here for one-tap access.
+          </Text>
+        ) : (
+          <View style={styles.tileGrid}>
+            {shown.map((place) => {
+              const name = libraryPlaceName(place);
+              return (
+                <View key={`quick:${place.id}`} style={styles.tile}>
+                  <Pressable
+                    style={styles.tileMain}
+                    disabled={editing}
+                    onPress={() => {
+                      onFlyTo(place);
+                      onClose();
+                    }}
+                    onLongPress={() => setQuickEditing(true)}
+                    accessibilityLabel={`Show ${name} on the map`}
+                    testID={`quick-place-${place.id}`}
+                  >
+                    <View style={[styles.tileBadge, { backgroundColor: place.color }]}>
+                      <Text style={styles.tileIcon}>{place.icon}</Text>
+                    </View>
+                    <Text style={styles.tileName} numberOfLines={2}>
+                      {name}
+                    </Text>
+                  </Pressable>
+                  {editing ? (
+                    <Pressable
+                      style={styles.tileCorner}
+                      onPress={() => onPatch(place.id, { tags: quickAccessTags(place) })}
+                      hitSlop={6}
+                      accessibilityLabel={`Remove ${name} from Quick access`}
+                      testID={`quick-remove-${place.id}`}
+                    >
+                      <Text style={styles.tileRemove}>✕</Text>
+                    </Pressable>
+                  ) : (
+                    <Pressable
+                      style={styles.tileCorner}
+                      onPress={() => {
+                        onNavigate(place);
+                        onClose();
+                      }}
+                      hitSlop={6}
+                      accessibilityLabel={`Directions to ${name}`}
+                      testID={`quick-go-${place.id}`}
+                    >
+                      <DirectionsIcon color={theme.accent} size={22} />
+                    </Pressable>
+                  )}
+                </View>
+              );
+            })}
+            {more > 0 ? (
+              <Pressable
+                style={[styles.tile, styles.tileMain]}
+                onPress={() => setQuickExpanded(true)}
+                accessibilityLabel={`Show ${more} more shortcuts`}
+                testID="quick-more"
+              >
+                <View style={[styles.tileBadge, styles.tileBadgeMore]}>
+                  <Text style={styles.tileMoreIcon}>⋯</Text>
+                </View>
+                <Text style={styles.tileName}>{more} more</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  /** The new-folder name field, folded behind the Folders heading's icon (or a folder's ⋯). */
+  const newFolderField = (): ReactNode =>
+    addingFolder ? (
+      <View style={styles.row}>
+        <TextInput
+          style={[styles.folderName, styles.newFolderInput]}
+          value={newFolder}
+          onChangeText={setNewFolder}
+          placeholder={current ? `New folder in ${current.folder.name}` : 'New folder name'}
+          autoFocus
+          returnKeyType="done"
+          onSubmitEditing={addFolder}
+          testID="folder-new-name"
+        />
+        <Pressable
+          style={[styles.button, newFolder.trim() ? null : styles.buttonDisabled]}
+          disabled={!newFolder.trim()}
+          onPress={addFolder}
+          testID="folder-add"
+        >
+          <Text style={styles.buttonText}>Add</Text>
+        </Pressable>
+      </View>
+    ) : null;
+
+  /**
+   * One folder level. The top level is Quick access, the folders, then All places — a
+   * destination of its own rather than a toggle competing with the Folders heading — and
+   * whatever is filed in no folder. Inside a folder: its subfolders, then what it holds.
+   */
   const renderLevel = (): ReactNode => {
     const subfolders = (allTree.byParent.get(folderId) ?? []).map((node) => node.folder);
     const levelPlaces = current ? current.places : allTree.places;
     const levelTracks = current ? current.tracks : allTree.tracks;
+    if (current) {
+      return (
+        <>
+          {renderFolders(subfolders)}
+          {newFolderField()}
+          {current.children.length + levelPlaces.length + levelTracks.length === 0 ? (
+            <Text style={styles.muted}>This folder is empty.</Text>
+          ) : null}
+          {renderPlaces(levelPlaces)}
+          {renderTracks(levelTracks)}
+        </>
+      );
+    }
     const nothingSaved = places.length === 0 && tracks.length === 0 && collections.length === 0;
     return (
       <>
-        {renderFolders(subfolders)}
-        {addingFolder ? (
-          <View style={styles.row}>
-            <TextInput
-              style={[styles.folderName, styles.newFolderInput]}
-              value={newFolder}
-              onChangeText={setNewFolder}
-              placeholder={current ? `New folder in ${current.folder.name}` : 'New folder name'}
-              autoFocus
-              returnKeyType="done"
-              onSubmitEditing={addFolder}
-              testID="folder-new-name"
-            />
-            <Pressable
-              style={[styles.button, newFolder.trim() ? null : styles.buttonDisabled]}
-              disabled={!newFolder.trim()}
-              onPress={addFolder}
-              testID="folder-add"
-            >
-              <Text style={styles.buttonText}>Add</Text>
-            </Pressable>
-          </View>
-        ) : !current ? (
+        {quickAccess()}
+        <View style={styles.sectionHead}>
+          <Text style={styles.sectionTitle}>Folders</Text>
           <Pressable
-            style={styles.newFolderButton}
+            style={styles.headIcon}
             onPress={() => setAddingFolder(true)}
+            hitSlop={6}
+            accessibilityRole="button"
             accessibilityLabel="New folder"
             testID="folder-new"
           >
-            <Text style={styles.link}>＋ New folder</Text>
+            <FolderPlusIcon color={theme.icon} />
           </Pressable>
-        ) : null}
+        </View>
+        {renderFolders(subfolders)}
+        {newFolderField()}
         {nothingSaved ? (
           <Text style={styles.muted}>
             Nothing saved yet. Long-press the map to save a pin, import a GPX/KML/KMZ file — or sign
             in to sync what you saved on your other devices.
           </Text>
-        ) : current && current.children.length + levelPlaces.length + levelTracks.length === 0 ? (
-          <Text style={styles.muted}>This folder is empty.</Text>
+        ) : null}
+        <Pressable
+          style={styles.row}
+          onPress={() => showView('places')}
+          accessibilityRole="button"
+          testID="collections-view-places"
+        >
+          <View style={styles.rowIcon}>
+            <MapPinIcon color={theme.icon} />
+          </View>
+          <View style={styles.rowMain}>
+            <Text style={styles.rowText}>All places</Text>
+            <Text style={styles.muted}>
+              {places.length} {places.length === 1 ? 'place' : 'places'}
+            </Text>
+          </View>
+          <Text style={styles.chevronText}>›</Text>
+        </Pressable>
+        {levelPlaces.length + levelTracks.length > 0 ? (
+          <Text style={styles.sectionLabel}>Not in a folder</Text>
         ) : null}
         {renderPlaces(levelPlaces)}
         {renderTracks(levelTracks)}
@@ -1378,29 +1545,19 @@ export function FavoritesSheet({
     );
   };
 
-  /** Sport and year filters, then what they leave and a way to put just that on the map. */
+  /**
+   * Sport, year and sort, then one line saying how much of the list is on the map. Showing
+   * or hiding the whole list is under Manage: the tab is for finding an activity, not for
+   * running a map layer.
+   */
   const libraryFilters = (): ReactNode => {
     const noun = view === 'activities' ? 'activities' : 'routes';
     if (viewSource.length === 0) return null;
+    const ids = viewTracks.map((track) => track.id);
+    const count = viewTracks.length;
     return (
       <View style={styles.libraryFilters}>
         <View style={styles.filterPills}>
-          <FilterMenu
-            label="Sort"
-            allLabel="Newest first"
-            value={trackSort === 'newest' ? null : trackSort}
-            options={[
-              { key: 'oldest', label: 'Oldest first' },
-              { key: 'name', label: 'Name' },
-              { key: 'distance', label: 'Longest first' },
-            ]}
-            onChange={(value) => {
-              setTrackSort(value ?? 'newest');
-              scrollRef.current?.scrollTo({ y: 0, animated: false });
-              setTrackLimit(TRACK_PAGE);
-            }}
-            testID="library-sort"
-          />
           {sports.length > 1 ? (
             <FilterMenu
               label="Sport"
@@ -1435,41 +1592,60 @@ export function FavoritesSheet({
               testID="library-year"
             />
           ) : null}
+          <FilterMenu
+            label="Newest first"
+            allLabel="Newest first"
+            value={trackSort === 'newest' ? null : trackSort}
+            options={[
+              { key: 'oldest', label: 'Oldest first' },
+              { key: 'name', label: 'Name' },
+              { key: 'distance', label: 'Longest first' },
+            ]}
+            onChange={(value) => {
+              setTrackSort(value ?? 'newest');
+              scrollRef.current?.scrollTo({ y: 0, animated: false });
+              setTrackLimit(TRACK_PAGE);
+            }}
+            testID="library-sort"
+          />
         </View>
-        <View style={styles.summaryRow}>
-          <Text style={styles.summaryText} numberOfLines={1}>
-            {viewTracks.length}{' '}
-            {viewTracks.length !== 1 ? noun : view === 'activities' ? 'activity' : 'route'}
+        <View style={[styles.summaryRow, styles.onMapRow]}>
+          <LayersIcon color={theme.icon} size={20} />
+          <Text style={styles.onMapText} numberOfLines={1} testID="library-on-map">
+            On map · {onMap} of {count}
           </Text>
-        </View>
-        <View style={styles.summaryRow}>
-          <Pressable
-            style={viewTracks.length === 0 && styles.buttonDisabled}
-            disabled={viewTracks.length === 0}
-            onPress={() =>
-              onSetTracksVisible(
-                viewTracks.map((track) => track.id),
-                listedHidden,
-              )
-            }
-            hitSlop={10}
-            accessibilityLabel={
-              listedHidden ? `Show all these ${noun} on the map` : `Hide all these ${noun}`
-            }
-            testID="library-toggle-visible"
-          >
-            <Text style={styles.link}>{listedHidden ? 'Show all' : 'Hide all'}</Text>
-          </Pressable>
-          <Pressable
-            style={viewTracks.length === 0 && styles.buttonDisabled}
-            disabled={viewTracks.length === 0}
-            onPress={() => onShowOnlyTracks(viewTracks.map((track) => track.id))}
-            hitSlop={10}
-            accessibilityLabel={`Show filtered on map ${noun} on the map`}
-            testID="library-show-only-matches"
-          >
-            <Text style={styles.link}>Show filtered on map</Text>
-          </Pressable>
+          {count > 0 ? (
+            <Pressable
+              onPress={() =>
+                setMenu({
+                  title: view === 'activities' ? 'Activities on the map' : 'Routes on the map',
+                  actions: [
+                    {
+                      label: `Show all ${count} on map`,
+                      onPress: () => onSetTracksVisible(ids, true),
+                      testID: 'library-show-all',
+                    },
+                    {
+                      label: `Hide all ${count} from map`,
+                      onPress: () => onSetTracksVisible(ids, false),
+                      testID: 'library-hide-all',
+                    },
+                    {
+                      label: `Show only these ${count}, hide other tracks`,
+                      onPress: () => onShowOnlyTracks(ids),
+                      testID: 'library-show-only-matches',
+                    },
+                  ],
+                })
+              }
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel={`Manage which ${noun} are on the map`}
+              testID="library-manage"
+            >
+              <Text style={styles.link}>Manage</Text>
+            </Pressable>
+          ) : null}
         </View>
       </View>
     );
@@ -1517,64 +1693,51 @@ export function FavoritesSheet({
     );
   };
 
-  /** Atop Activities: what has come in from Garmin, and a check for more. */
+  /**
+   * Atop Activities, one line: what has come in from Garmin and a check for more. The
+   * schedule and the history backfill are Settings → Garmin's to explain.
+   */
   const garminActivitiesCard = (): ReactNode => {
     const newest = activities[0] ? activityDate(activities[0]) : null;
     const last = garmin.lastImport;
     return (
-      <View style={styles.card} testID="garmin-library">
-        {garmin.error ? <Text style={styles.error}>{garmin.error}</Text> : null}
-        <View style={styles.cardHead}>
-          <Text style={styles.cardTitle}>From Garmin Connect</Text>
-          <View style={styles.cardActions}>
-            {/* Checking is what the schedule does by itself; by hand it is a
-                small refresh, not the screen's main button. */}
-            <Pressable
-              style={[styles.iconButton, garmin.busy && styles.buttonDisabled]}
-              disabled={garmin.busy}
-              onPress={() => void garmin.checkNewActivities()}
-              hitSlop={8}
-              accessibilityLabel="Check Garmin for new activities"
-              testID="garmin-check-newest"
-            >
-              {garmin.busy ? (
-                <ActivityIndicator size="small" color={theme.accent} />
-              ) : (
-                <Text style={styles.iconButtonText}>↻</Text>
-              )}
-            </Pressable>
-          </View>
+      <View style={styles.garminLine} testID="garmin-library">
+        <View style={styles.rowMain}>
+          <Text style={styles.muted} numberOfLines={2}>
+            Garmin ·{' '}
+            {activities.length > 0
+              ? `${activities.length} imported${newest ? `, newest ${recordedLabel(newest)}` : ''}`
+              : 'tap ↻ to import'}
+            {garmin.lastActivityCheck ? ` · checked ${fmtCheckTime(garmin.lastActivityCheck)}` : ''}
+            {activities.length > 0 && !garmin.historyComplete
+              ? ' · older history still coming'
+              : ''}
+          </Text>
+          {last ? (
+            <Text style={styles.muted} testID="garmin-import-result">
+              {last.imported > 0
+                ? `Added ${last.imported} ${last.imported === 1 ? 'activity' : 'activities'}`
+                : 'Nothing new'}
+              {last.errors > 0 ? ` · ${last.errors} failed` : ''}
+              {last.sorted > 0 ? ` · filed ${last.sorted} into sport folders` : ''}
+            </Text>
+          ) : null}
+          {garmin.error ? <Text style={styles.error}>{garmin.error}</Text> : null}
         </View>
-        <Text style={styles.muted}>
-          {activities.length > 0
-            ? `${activities.length} in Atlas${newest ? ` · newest ${recordedLabel(newest)}` : ''}`
-            : 'None yet. Tap ↻ to import; GPS activities are filed by sport.'}
-          {garmin.lastActivityCheck ? ` · checked ${fmtCheckTime(garmin.lastActivityCheck)}` : ''}
-        </Text>
-        {last ? (
-          <Text style={styles.muted} testID="garmin-import-result">
-            {last.imported > 0
-              ? `Added ${last.imported} ${last.imported === 1 ? 'activity' : 'activities'}`
-              : 'Nothing new'}
-            {last.errors > 0 ? ` · ${last.errors} failed` : ''}
-            {last.sorted > 0 ? ` · filed ${last.sorted} into sport folders` : ''}
-          </Text>
-        ) : null}
-        {/* Each check also reaches further back until the whole history is in. */}
-        {activities.length > 0 ? (
-          <Text style={styles.muted} testID="garmin-history-status">
-            {garmin.historyComplete
-              ? 'Whole Garmin history imported.'
-              : garmin.nextActivityOffset > 0
-                ? `Older history: ${garmin.nextActivityOffset} checked so far, more with each check.`
-                : 'Older history is filled in with each check.'}
-          </Text>
-        ) : null}
-        <Text style={styles.muted} testID="garmin-auto-status">
-          {garmin.autoImport === 'off'
-            ? 'Automatic import is off (Settings → Garmin).'
-            : `Checks by itself ${garmin.autoImport === 'daily' ? 'daily' : 'every 6 hours'}.`}
-        </Text>
+        <Pressable
+          style={[styles.iconButton, garmin.busy && styles.buttonDisabled]}
+          disabled={garmin.busy}
+          onPress={() => void garmin.checkNewActivities()}
+          hitSlop={8}
+          accessibilityLabel="Check Garmin for new activities"
+          testID="garmin-check-newest"
+        >
+          {garmin.busy ? (
+            <ActivityIndicator size="small" color={theme.accent} />
+          ) : (
+            <Text style={styles.iconButtonText}>↻</Text>
+          )}
+        </Pressable>
       </View>
     );
   };
@@ -1692,75 +1855,29 @@ export function FavoritesSheet({
       ) : null}
 
       <View style={styles.tabBar} accessibilityRole="tablist">
-        {(['folders', 'courses', 'activities'] as const).map((item) => (
-          <Pressable
-            key={item}
-            style={[
-              styles.tab,
-              (view === item || (item === 'folders' && view === 'places')) && styles.tabOn,
-            ]}
-            onPress={() => showView(item)}
-            accessibilityRole="tab"
-            accessibilityState={{
-              selected: view === item || (item === 'folders' && view === 'places'),
-            }}
-            testID={`collections-view-${item}`}
-          >
-            <Text
-              style={[
-                styles.tabText,
-                (view === item || (item === 'folders' && view === 'places')) && styles.tabTextOn,
-              ]}
-              numberOfLines={1}
-              adjustsFontSizeToFit
-            >
-              {item === 'folders' ? 'Places' : VIEW_LABELS[item]}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
-      {view === 'folders' || view === 'places' ? (
-        <View style={styles.summaryRow}>
-          <Pressable
-            onPress={() => {
-              showView('folders');
-              openFolder(null);
-            }}
-            testID="collections-places-folders"
-          >
-            <Text style={view === 'folders' ? styles.link : styles.muted}>Folders</Text>
-          </Pressable>
-          <Pressable onPress={() => showView('places')} testID="collections-view-places">
-            <Text style={view === 'places' ? styles.link : styles.muted}>All places</Text>
-          </Pressable>
-          {view === 'places' ? (
-            <FilterMenu
-              label="Sort"
-              allLabel="Name"
-              value={placeSort === 'name' ? null : placeSort}
-              options={[
-                { key: 'recent', label: 'Recently added' },
-                { key: 'folder', label: 'Folder' },
-              ]}
-              onChange={(value) => {
-                setPlaceSort(value ?? 'name');
-                scrollRef.current?.scrollTo({ y: 0, animated: false });
-                setPlaceLimit(PLACE_PAGE);
+        {(['folders', 'courses', 'activities'] as const).map((item) => {
+          const on = view === item || (item === 'folders' && placesTab);
+          return (
+            <Pressable
+              key={item}
+              style={[styles.tab, on && styles.tabOn]}
+              onPress={() => {
+                showView(item);
+                // Places opens at its top level: Quick access and the folders.
+                if (item === 'folders') openFolder(null);
               }}
-              testID="places-sort"
-            />
-          ) : null}
-        </View>
-      ) : null}
-      {reordering ? (
-        <View style={styles.summaryRow}>
-          <Text style={styles.muted}>Drag to reorder. Hold a row anytime to move it.</Text>
-          <Pressable onPress={() => setReordering(false)} testID="collections-reorder-done">
-            <Text style={styles.link}>Done</Text>
-          </Pressable>
-        </View>
-      ) : null}
-      {view === 'folders' || view === 'places' || viewSource.length > 0 ? (
+              accessibilityRole="tab"
+              accessibilityState={{ selected: on }}
+              testID={`collections-view-${item}`}
+            >
+              <Text style={[styles.tabText, on && styles.tabTextOn]} numberOfLines={1}>
+                {item === 'folders' ? 'Places' : VIEW_LABELS[item]}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      {placesTab || viewSource.length > 0 ? (
         <View style={styles.filterRow}>
           <TextInput
             style={[styles.textField, styles.filterInput]}
@@ -1771,9 +1888,7 @@ export function FavoritesSheet({
               setPlaceLimit(PLACE_PAGE);
             }}
             placeholder={
-              view === 'folders'
-                ? 'Search folders and places'
-                : `Filter ${VIEW_LABELS[view].toLocaleLowerCase()}`
+              placesTab ? 'Search saved places' : `Search ${VIEW_LABELS[view].toLocaleLowerCase()}`
             }
             autoCapitalize="none"
             autoCorrect={false}
@@ -1801,8 +1916,47 @@ export function FavoritesSheet({
           ) : null}
         </View>
       ) : null}
+      {reordering ? (
+        <View style={styles.summaryRow}>
+          <Text style={[styles.muted, styles.rowMain]}>
+            Hold a row and drag it to reorder, or onto a folder to move it there.
+          </Text>
+          <Pressable onPress={() => setReordering(false)} testID="collections-reorder-done">
+            <Text style={styles.link}>Done</Text>
+          </Pressable>
+        </View>
+      ) : null}
       {view === 'courses' || view === 'activities' ? libraryFilters() : null}
       {view === 'folders' && !filtered.active && current ? folderHeader(current.folder) : null}
+      {view === 'places' && !filtered.active ? (
+        <View style={[styles.crumbRow, styles.folderHeader]}>
+          <Pressable
+            style={styles.backButton}
+            onPress={() => showView('folders')}
+            hitSlop={8}
+            accessibilityLabel="Back to Places"
+            testID="collections-places-back"
+          >
+            <Text style={styles.backText}>‹</Text>
+          </Pressable>
+          <Text style={[styles.rowText, styles.rowMain]}>All places</Text>
+          <FilterMenu
+            label="Name"
+            allLabel="Name"
+            value={placeSort === 'name' ? null : placeSort}
+            options={[
+              { key: 'recent', label: 'Recently added' },
+              { key: 'folder', label: 'Folder' },
+            ]}
+            onChange={(value) => {
+              setPlaceSort(value ?? 'name');
+              scrollRef.current?.scrollTo({ y: 0, animated: false });
+              setPlaceLimit(PLACE_PAGE);
+            }}
+            testID="places-sort"
+          />
+        </View>
+      ) : null}
 
       <ScrollView
         ref={scrollRef}
@@ -1818,72 +1972,21 @@ export function FavoritesSheet({
         {/* A filter that matched nothing is not an empty collection: saying
             "nothing saved yet" to someone whose pins are all still there reads
             as data loss. */}
-        {(view === 'folders' || view === 'places') &&
-        !filtered.active &&
-        (view === 'places' || !current) ? (
-          <View>
-            <Text style={styles.sectionLabel}>Quick access</Text>
-            {places.some(isQuickAccess) ? (
-              <View>
-                {places.filter(isQuickAccess).map((place) => (
-                  <View style={styles.row} key={`quick:${place.id}`}>
-                    <Pressable
-                      style={styles.rowMain}
-                      onPress={() => {
-                        onFlyTo(place);
-                        onClose();
-                      }}
-                      testID={`quick-place-${place.id}`}
-                    >
-                      <Text style={styles.rowText} numberOfLines={2}>
-                        {place.icon} {libraryPlaceName(place)}
-                      </Text>
-                    </Pressable>
-                    <ActionMenu
-                      title={`Quick access ${libraryPlaceName(place)}`}
-                      testID={`quick-more-${place.id}`}
-                      actions={[
-                        {
-                          label: 'Remove from Quick access',
-                          onPress: () => onPatch(place.id, { tags: quickAccessTags(place) }),
-                          testID: `quick-remove-${place.id}`,
-                        },
-                      ]}
-                    />
-                    <Pressable
-                      style={styles.buttonQuiet}
-                      accessibilityLabel={`Directions to ${place.name}`}
-                      onPress={() => {
-                        onNavigate(place);
-                        onClose();
-                      }}
-                    >
-                      <Text style={styles.link}>Go</Text>
-                    </Pressable>
-                  </View>
-                ))}
-              </View>
-            ) : (
-              <Text style={styles.muted}>Pin Home, Work or any place here from its ⋯ menu.</Text>
-            )}
-            <Text style={styles.sectionLabel}>{view === 'places' ? 'All places' : 'Folders'}</Text>
-          </View>
-        ) : null}
-        {(view === 'folders' || view === 'places') && filtered.active && filtered.empty ? (
+        {placesTab && filtered.active && filtered.empty ? (
           <Text style={styles.muted}>Nothing here matches “{filter.trim()}”.</Text>
         ) : null}
         {view === 'activities' && garmin.connected ? garminActivitiesCard() : null}
-        {view === 'folders' || (view === 'places' && filtered.active)
+        {placesTab
           ? filtered.active
             ? renderResults()
-            : renderLevel()
-          : view === 'places'
-            ? filtered.places.length > 0
-              ? renderPlaces(libraryPlaces(filtered.places, collections, placeSort), true)
-              : libraryEmpty()
-            : viewTracks.length > 0
-              ? renderTracks(viewTracks, true)
-              : libraryEmpty()}
+            : view === 'folders'
+              ? renderLevel()
+              : places.length > 0
+                ? renderPlaces(libraryPlaces(places, collections, placeSort), true)
+                : libraryEmpty()
+          : viewTracks.length > 0
+            ? renderTracks(viewTracks, true)
+            : libraryEmpty()}
         {view === 'places' && garmin.connected ? garminLocationsCard() : null}
         {view === 'courses' && garmin.connected ? (
           <GarminCourses
@@ -1895,6 +1998,11 @@ export function FavoritesSheet({
         ) : null}
         <View style={styles.listFoot} />
       </ScrollView>
+      <ActionSheet
+        title={menu?.title ?? ''}
+        actions={menu?.actions ?? null}
+        onClose={() => setMenu(null)}
+      />
     </BottomSheet>
   );
 }
@@ -2033,9 +2141,51 @@ const styles = StyleSheet.create({
   muted: { fontSize: 13, color: theme.textMuted, marginTop: 2 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
   rowRevealed: { backgroundColor: theme.accentFaint, borderRadius: 8 },
-  mapState: { fontSize: 11, color: theme.textMuted, marginTop: 2 },
-  eyeButton: { paddingHorizontal: 2, paddingVertical: 4 },
-  folderIcon: { fontSize: 20 },
+  // A row's tappable body: its pin or sport, then the text — the eye stays its own target.
+  rowPress: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  rowIcon: { width: 34, alignItems: 'center', justifyContent: 'center' },
+  eyeButton: { paddingHorizontal: 6, paddingVertical: 8 },
+  sectionHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  sectionTitle: { fontSize: 16, fontWeight: '700', color: theme.text },
+  headIcon: { minWidth: 36, minHeight: 36, alignItems: 'flex-end', justifyContent: 'center' },
+  // Quick access: two compact tiles to a row, so six shortcuts take three rows at most.
+  tileGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 8 },
+  tile: { width: '48.5%', borderRadius: 14, backgroundColor: theme.surfaceMuted },
+  // Top row: the place's own badge (as on its row) left, Directions right; the name
+  // gets the tile's full width underneath instead of wrapping around the arrow.
+  tileMain: { minHeight: 84, paddingHorizontal: 12, paddingTop: 10, paddingBottom: 12, gap: 8 },
+  tileBadge: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tileBadgeMore: { backgroundColor: theme.surface },
+  tileIcon: { fontSize: 16 },
+  tileMoreIcon: { fontSize: 16, color: theme.text, fontWeight: '700' },
+  tileName: { fontSize: 15, fontWeight: '600', color: theme.text },
+  tileCorner: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.surface,
+  },
+  tileRemove: { fontSize: 16, color: theme.danger, fontWeight: '700' },
+  onMapRow: { justifyContent: 'flex-start', marginTop: 12, marginBottom: 4 },
+  onMapText: { flex: 1, fontSize: 15, color: theme.text, fontWeight: '600' },
+  garminLine: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6 },
   // The whole name block opens the folder: icon, name and contents line.
   folderOpen: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
   chevronText: { fontSize: 22, color: theme.textMuted, paddingHorizontal: 2 },

@@ -75,6 +75,8 @@ interface AppSheetsProps {
 
   /** Open the destination card for a favorite/saved place. */
   onPickDestination: (target: DestinationTarget) => void;
+  /** Plan a route from here to a saved place — Quick access's one-tap arrow. */
+  onDirectionsTo: (to: { lat: number; lng: number }, name: string) => void;
   /** Frame a track on the map and open its profile (a track row's name). */
   onShowTrack: (track: TrackRecord) => void;
   /** Convert a stored/imported track to an editable snapped route. */
@@ -128,6 +130,7 @@ export function AppSheets({
   offlinePrefs,
   onDrawRegion,
   onPickDestination,
+  onDirectionsTo,
   onShowTrack,
   onPlanTrack,
   onEditGarminCourse,
@@ -168,13 +171,7 @@ export function AppSheets({
         }
         onNavigate={(p) => {
           onCloseFavorites();
-          onPickDestination({
-            lat: p.lat,
-            lng: p.lng,
-            name: p.name ?? 'Favorite',
-            address: p.address || undefined,
-            canSave: false,
-          });
+          onDirectionsTo({ lat: p.lat, lng: p.lng }, p.name);
         }}
         onPatch={(id, patch) => void data.updatePlace(id, patch)}
         onDelete={(id) => void data.deletePlace(id)}

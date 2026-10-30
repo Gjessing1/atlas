@@ -2106,6 +2106,10 @@ function AppInner() {
               setOfflineRegion({ corner: null, bbox: null });
             }}
             onPickDestination={dest.pick}
+            onDirectionsTo={(to, name) => {
+              dest.clear();
+              directions.planTo(to, name);
+            }}
             onShowTrack={showTrack}
             onPlanTrack={planTrack}
             onEditGarminCourse={(id) => void editGarminCourse(id)}

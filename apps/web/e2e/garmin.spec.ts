@@ -56,7 +56,13 @@ test('connects Garmin, imports a GPS activity and sends a planned course', async
   await library.getByRole('combobox', { name: 'Library sport' }).selectOption('Running');
   await library.getByRole('combobox', { name: 'Activity year' }).selectOption('2026');
   await expect(library.getByRole('button', { name: 'Morning run', exact: true })).toBeVisible();
-  await library.getByRole('button', { name: 'Show filtered on map' }).click();
+  // Bulk visibility lives under Manage, beside the list's one-line map summary.
+  await expect(library.locator('.library-on-map')).toContainText('On map · 1 of 1');
+  const manage = async (action: RegExp) => {
+    await library.getByRole('button', { name: 'Manage activities on the map' }).click();
+    await page.getByRole('button', { name: action }).click();
+  };
+  await manage(/^Show only these 1/);
   const trackLine = () =>
     page.evaluate(
       () =>
@@ -67,10 +73,11 @@ test('connects Garmin, imports a GPS activity and sends a planned course', async
           )?.id ?? null,
     );
   await expect.poll(trackLine).toBeTruthy();
-  const listed = library.getByRole('group', { name: 'Tracks on map' });
-  await listed.getByRole('button', { name: 'Hide all' }).click();
+  await expect(library.locator('.library-on-map')).toContainText('On map · 1 of 1');
+  await manage(/^Hide all 1/);
   await expect.poll(trackLine).toBeNull();
-  await listed.getByRole('button', { name: 'Show all' }).click();
+  await expect(library.locator('.library-on-map')).toContainText('On map · 0 of 1');
+  await manage(/^Show all 1/);
   await library.getByRole('button', { name: 'Close panel' }).click();
   await expect
     .poll(() =>

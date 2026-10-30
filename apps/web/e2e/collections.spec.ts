@@ -3,7 +3,15 @@ import { closePlaceEditor, waitForMap } from './helpers';
 
 async function collectionAction(page: Page, title: string, label: string) {
   await page.getByRole('button', { name: `More actions for ${title}`, exact: true }).click();
-  await page.getByRole('button', { name: label, exact: true }).click();
+  await page
+    .getByRole('group', { name: `${title} actions`, exact: true })
+    .getByRole('button', { name: label, exact: true })
+    .click();
+}
+
+/** The Folders heading's own button — Quick access and the folder list share one screen. */
+async function newFolder(page: Page) {
+  await page.getByRole('button', { name: 'New folder', exact: true }).click();
 }
 
 test('main search reveals nested saved folders and tracks in Collections', async ({ page }) => {
@@ -11,7 +19,7 @@ test('main search reveals nested saved folders and tracks in Collections', async
   await page.goto('/');
   await waitForMap(page);
   await page.getByRole('button', { name: 'Collections', exact: true }).click();
-  await collectionAction(page, 'Collections', 'New folder');
+  await newFolder(page);
   await page.getByPlaceholder('New folder name').fill('Autumn trips');
   await page.getByPlaceholder('New folder name').press('Enter');
   await collectionAction(page, 'Autumn trips', 'New folder inside Autumn trips');
@@ -75,7 +83,7 @@ test('a nested collection can move up to the root', async ({ page }) => {
   await waitForMap(page);
   await page.getByRole('button', { name: 'Collections', exact: true }).click();
 
-  await collectionAction(page, 'Collections', 'New folder');
+  await newFolder(page);
   await page.getByPlaceholder('New folder name').fill('Parent');
   await page.getByPlaceholder('New folder name').press('Enter');
   await collectionAction(page, 'Parent', 'New folder inside Parent');
@@ -101,7 +109,7 @@ test('a subfolder can be created inside a collapsed folder, and deletes are conf
   await waitForMap(page);
   await page.getByRole('button', { name: 'Collections', exact: true }).click();
 
-  await collectionAction(page, 'Collections', 'New folder');
+  await newFolder(page);
   await page.getByPlaceholder('New folder name').fill('Trips');
   await page.getByPlaceholder('New folder name').press('Enter');
 
@@ -135,7 +143,7 @@ test('a folder can be dragged into another folder', async ({ page }) => {
   await page.getByRole('button', { name: 'Collections', exact: true }).click();
 
   for (const name of ['Alpha', 'Beta']) {
-    await collectionAction(page, 'Collections', 'New folder');
+    await newFolder(page);
     await page.getByPlaceholder('New folder name').fill(name);
     await page.getByPlaceholder('New folder name').press('Enter');
   }
@@ -158,7 +166,7 @@ test('a folder can be dragged into another folder', async ({ page }) => {
   await expect(row('Alpha').locator(':scope > .item-list .folder-name')).toHaveText('Beta');
 });
 
-test('a saved place goes straight from its row to the planner, and Export all has two homes', async ({
+test('a saved place reaches the planner from its row menu, and Export all has two homes', async ({
   page,
 }) => {
   await page.goto('/#map=13/59.91/10.75&pin=59.92/10.76');
@@ -176,9 +184,10 @@ test('a saved place goes straight from its row to the planner, and Export all ha
   await expect(page.locator('.place-edit-dialog')).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Collections', exact: true }).click();
-  // Go is the whole trip: no place card in between, and the panel steps aside
-  // for the planner it just opened.
-  await page.getByRole('button', { name: 'Directions to Cabin' }).click();
+  // The row itself only shows the place; Directions is an explicit choice in its
+  // menu, with no card in between, and the panel steps aside for the planner.
+  await expect(page.getByRole('button', { name: 'Directions to Cabin' })).toHaveCount(0);
+  await collectionAction(page, 'Cabin', 'Directions');
   await expect(page.locator('.sidebar')).toHaveCount(0);
   await expect(page.locator('.route-panel')).toBeVisible();
 
@@ -207,10 +216,10 @@ test('the tree can be filtered by name and by a tapped tag', async ({ page }) =>
   await page.keyboard.press('Escape');
 
   await page.getByRole('button', { name: 'Collections', exact: true }).click();
-  await collectionAction(page, 'Collections', 'New folder');
+  await newFolder(page);
   await page.getByPlaceholder('New folder name').fill('Stands');
   await page.getByPlaceholder('New folder name').press('Enter');
-  await collectionAction(page, 'Collections', 'New folder');
+  await newFolder(page);
   await page.getByPlaceholder('New folder name').fill('Fishing');
   await page.getByPlaceholder('New folder name').press('Enter');
 
@@ -333,7 +342,7 @@ test('a folder or a tag can label its pins on the map', async ({ page }) => {
   expect(await labelled()).toBeNull();
 
   await page.getByRole('button', { name: 'Collections', exact: true }).click();
-  await collectionAction(page, 'Collections', 'New folder');
+  await newFolder(page);
   await page.getByPlaceholder('New folder name').fill('Family');
   await page.getByPlaceholder('New folder name').press('Enter');
   await collectionAction(page, 'Mormor', 'Edit Mormor');
@@ -360,7 +369,7 @@ test('a folder or a tag can label its pins on the map', async ({ page }) => {
 
   // A hidden folder takes its names with it; switching both off removes the layer.
   await page.getByRole('button', { name: 'Clear filter' }).click();
-  await collectionAction(page, 'Family', 'Hide collection Family from map');
+  await page.getByRole('button', { name: 'Hide collection Family from map' }).click();
   await expect.poll(labelled).toEqual(['Elgpost nord']);
   await collectionAction(page, 'Family', 'Names of Family on the map');
   await filter.fill('#stand');
@@ -438,7 +447,8 @@ test('Places offers Quick access, human context, sorting, and clear inherited vi
   await expect(rows).toHaveCount(2);
   await expect(rows.first()).toContainText('Home');
   await expect(rows.first()).toContainText('Family · Oslo');
-  await expect(rows.first()).toContainText('Hidden by Family');
+  // The eye says it; the row no longer repeats it in words, but its description does.
+  await expect(rows.first()).not.toContainText('Hidden by Family');
   await expect(rows.first()).toHaveAccessibleDescription(/Hidden by Family/);
   await expect(rows.first()).toHaveCSS('opacity', '1');
   await expect(library.locator('.sidebar-body')).not.toContainText('59.9149');
@@ -449,21 +459,42 @@ test('Places offers Quick access, human context, sorting, and clear inherited vi
     'Home with a long and recognizable place name',
     'Pin to Quick access',
   );
+  // Quick access sits at the top of Places, not inside the All places list.
+  await library.getByRole('button', { name: 'Back to Places' }).click();
   await expect(library.locator('.quick-access')).toContainText(
     'Home with a long and recognizable place name',
   );
   await page.reload();
   await waitForMap(page);
   await page.getByRole('button', { name: 'Collections', exact: true }).click();
-  await expect(page.locator('.quick-access')).toContainText(
-    'Home with a long and recognizable place name',
-  );
+  const quick = page.locator('.quick-access');
+  await expect(quick).toContainText('Home with a long and recognizable place name');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: 'test-results/collections-places-mobile.png' });
+  await page.setViewportSize({ width: 1280, height: 720 });
+  // A tile shows the place; its arrow is the one-click way there; Edit unpins.
+  await expect(
+    quick.getByRole('button', {
+      name: 'Directions to Home with a long and recognizable place name',
+    }),
+  ).toBeVisible();
+  // Pinned is not moved: the place is still filed in Family.
+  await page.getByRole('button', { name: 'Expand Family' }).click();
+  await expect(page.locator('.folder-row .item-name')).toContainText([/Home with a long/]);
+  await page.getByRole('button', { name: 'Collapse Family' }).click();
   await page.getByLabel('Filter collections').fill('Family');
   await expect(page.locator('.folder-name')).toHaveText(['Family']);
   await expect(page.locator('.item-name')).toHaveCount(1);
   await page.getByRole('button', { name: 'Family', exact: true }).click();
   await expect(page.getByLabel('Filter collections')).toHaveValue('');
   await expect(page.getByRole('button', { name: 'Collapse Family' })).toBeVisible();
+  await quick.getByRole('button', { name: 'Edit', exact: true }).click();
+  await quick
+    .getByRole('button', {
+      name: 'Remove Home with a long and recognizable place name from Quick access',
+    })
+    .click();
+  await expect(quick).toContainText('Pin a saved place here');
 });
 
 test('empty Routes hides search and offers useful actions', async ({ page }) => {
@@ -537,6 +568,9 @@ test('large libraries page their lists without changing map visibility', async (
   await library.getByRole('button', { name: 'Clear filter' }).click();
   await library.getByRole('tab', { name: 'Activities', exact: true }).click();
   await expect(library.locator('.item-row')).toHaveCount(30);
+  // Map state is one summary line, and bulk visibility waits under Manage.
+  await expect(library.locator('.library-on-map')).toContainText('On map · 0 of 225');
+  await expect(library.getByRole('button', { name: 'Show all', exact: true })).toHaveCount(0);
   await library.getByRole('button', { name: 'Show more (195 remaining)' }).click();
   await expect(library.locator('.item-row')).toHaveCount(60);
   await library.getByLabel('Sort tracks').selectOption('oldest');

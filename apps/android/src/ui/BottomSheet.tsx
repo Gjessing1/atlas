@@ -274,9 +274,18 @@ export const BottomSheet = forwardRef<BottomSheetHandle, BottomSheetProps>(funct
     </Animated.View>
   );
 
+  // The sheet stops above the system navigation bar, so the strip behind that
+  // bar would otherwise show the map (or the dimmed backdrop) through it. Paint
+  // it in the sheet's colour so a full-width sheet reaches the screen edge. A
+  // sheet given its own geometry (a floating dock) keeps the map beneath it.
+  const navFill = sheetStyle ? null : (
+    <View pointerEvents="none" style={[styles.navFill, { height: sheetBottom }]} />
+  );
+
   if (mode === 'map') {
     return (
       <View style={styles.mapLayer} pointerEvents="box-none">
+        {navFill}
         {surface}
       </View>
     );
@@ -298,6 +307,7 @@ export const BottomSheet = forwardRef<BottomSheetHandle, BottomSheetProps>(funct
           accessibilityRole="button"
           accessibilityLabel="Close sheet"
         />
+        {navFill}
         {surface}
       </View>
     </Modal>
@@ -325,6 +335,13 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.18,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: -3 },
+  },
+  navFill: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: theme.surface,
   },
   handleTouch: { height: 28, alignItems: 'center', justifyContent: 'center' },
   handleButton: {

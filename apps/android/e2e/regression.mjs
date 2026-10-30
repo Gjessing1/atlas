@@ -602,13 +602,21 @@ async function openMenuItem(id) {
 
 // Collections remembers the folder it was left in (a run tapped from a folder
 // closes the sheet, and the next one is picked from the same place), so a step
-// that wants the top level goes there explicitly.
+// that wants the top level goes there explicitly: the Places tab opens at it.
 async function openCollectionsAtRoot() {
   await openMenuItem('open-favorites');
   await waitForId('favorites-sheet');
   await tap('favorites-sheet-handle');
   await tap('collections-view-folders');
-  await tap('collections-places-folders');
+}
+
+/** Hold a row until its long-press fires: Collections keeps row actions there. */
+async function longPress(id) {
+  const xml = await waitForId(id);
+  const { bounds } = visibleNode(xml, id);
+  const x = String(Math.round((bounds.left + bounds.right) / 2));
+  const y = String(Math.round((bounds.top + bounds.bottom) / 2));
+  shell('input', 'swipe', x, y, x, y, '900');
 }
 
 async function closeSettings() {
@@ -734,20 +742,15 @@ async function verifyCollectionBrowsing({ placeId, folderId }) {
   let xml = hierarchy();
   if (nodeForId(xml, `drag-${placeId}`) || nodeForId(xml, `drag-${folderId}`))
     throw new Error('Drag handles must start hidden');
-  await tap(`favorite-more-${placeId}`);
+  // A row's actions are a long-press away; pinning makes a Quick access tile.
+  await longPress(`favorite-${placeId}`);
   await tap(`favorite-quick-${placeId}`);
   await waitForId(`quick-place-${placeId}`);
+  expectIds(hierarchy(), [`quick-go-${placeId}`]);
+  // Moving and reordering are management: only in Reorder does holding drag.
   await tap('collections-more');
   await tap('collections-reorder');
   await waitForId(`drag-${folderId}`);
-  await tap('collections-reorder-done');
-  await waitForId(`drag-${folderId}`, false);
-  await tap('collections-view-places');
-  await tap('places-sort');
-  await tap('places-sort-option-recent');
-  await waitForId(`favorite-${placeId}`);
-  await tap('collections-places-folders');
-  // Hold the place's name, then move it into the folder without exposing a grip.
   xml = await waitForId(`favorite-${placeId}`);
   const from = visibleNode(xml, `favorite-${placeId}`).bounds;
   const to = visibleNode(xml, `folder-row-${folderId}`).bounds;
@@ -767,26 +770,34 @@ async function verifyCollectionBrowsing({ placeId, folderId }) {
     await delay(35);
   }
   shell('input', 'motionevent', 'UP', String(x), String(targetY));
+  await tap('collections-reorder-done');
+  await waitForId(`drag-${folderId}`, false);
   await tap(`folder-open-${folderId}`);
   await waitForId(`favorite-${placeId}`);
   keepScreenshot('collections-held-place.png');
   // Restore its folder through the normal editor so later scenarios keep their fixture.
-  await tap(`favorite-more-${placeId}`);
+  await longPress(`favorite-${placeId}`);
   await tap(`favorite-edit-${placeId}`);
   await tapAfterScroll(`favorite-folder-${placeId}-none`, 'collections-scroll');
   await tapAfterScroll(`favorite-save-${placeId}`, 'collections-scroll');
   await tap('collections-back');
   await waitForId(`favorite-${placeId}`);
   keepScreenshot('collections-places.png');
+  // All places is a destination after the folders, with its own sort and back.
+  await tapAfterScroll('collections-view-places', 'collections-scroll');
+  await tap('places-sort');
+  await tap('places-sort-option-recent');
+  await waitForId(`favorite-${placeId}`);
+  await tap('collections-places-back');
+  await waitForId(`folder-row-${folderId}`);
 }
 
 function isChecked(node) {
   return Boolean(node?.includes('checked="true"') || node?.includes('selected="true"'));
 }
 
-// Planning starts where a user starts it: a picked place's card. "Go" on a
-// saved place opens that card, and its Directions plans from a GPS fix to the
-// place — a fix this AVD often never delivers, even with a `geo fix` set.
+// Planning starts the one-tap way: a Quick access tile's arrow plans from a GPS
+// fix to the place — a fix this AVD often never delivers, even with a `geo fix` set.
 // So wait out the lookup (8 s, then last-known), and if the plan still has
 // only the place, give it a second stop with a map tap, which a plan takes as
 // a stop. Not through the stop box: injected keys are this AVD's least
@@ -796,8 +807,7 @@ function isChecked(node) {
 // depends on GPS timing.
 async function openRouteFromSavedPlace(placeId) {
   await openCollectionsAtRoot();
-  await tap(`favorite-nav-${placeId}`);
-  await tap('destination-navigate');
+  await tap(`quick-go-${placeId}`);
   await waitForId('route-sheet');
   const settled = await waitFor(
     'the Directions origin lookup to settle',
@@ -1029,7 +1039,7 @@ async function verifySavedCollectionSearch({ folderId, trackId }) {
     await waitFor('search reveal to leave Collections unfiltered', hierarchy, (xml) => {
       const field = nodeForId(xml, 'collections-filter');
       // UiAutomator reports a blank TextInput's placeholder as its text.
-      return Boolean(field && /text="(?:|Search folders and places)"/.test(field));
+      return Boolean(field && /text="(?:|Search saved places)"/.test(field));
     });
     await tap('favorites-close');
   }

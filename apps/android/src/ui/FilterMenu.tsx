@@ -125,7 +125,6 @@ export function ActionMenu({
   testID: string;
 }) {
   const [open, setOpen] = useState(false);
-  const side = useSideInsets();
   return (
     <>
       <Pressable
@@ -137,39 +136,57 @@ export function ActionMenu({
       >
         <Text style={styles.more}>⋯</Text>
       </Pressable>
-      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
-        <Pressable
-          style={[styles.backdrop, { paddingLeft: 24 + side.left, paddingRight: 24 + side.right }]}
-          onPress={() => setOpen(false)}
-          accessibilityLabel="Close menu"
-        >
-          <Pressable style={styles.card} onPress={() => {}}>
-            <Text style={styles.title} numberOfLines={1}>
-              {title}
-            </Text>
-            <ScrollView style={styles.list}>
-              {actions.map((action) => (
-                <Pressable
-                  key={action.testID}
-                  style={styles.row}
-                  onPress={() => {
-                    setOpen(false);
-                    action.onPress();
-                  }}
-                  accessibilityRole={action.selected === undefined ? 'button' : 'checkbox'}
-                  accessibilityState={{ checked: action.selected }}
-                  testID={action.testID}
-                >
-                  <Text style={[styles.rowText, action.danger && styles.danger]}>
-                    {action.label}
-                  </Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      <ActionSheet title={title} actions={open ? actions : null} onClose={() => setOpen(false)} />
     </>
+  );
+}
+
+/**
+ * The same named actions without a ⋯ of their own, for whoever opens them — a long-pressed
+ * row in Collections, where a button on every row was what made the list read as a
+ * management screen. Open while `actions` is non-null.
+ */
+export function ActionSheet({
+  title,
+  actions,
+  onClose,
+}: {
+  title: string;
+  actions: readonly MenuAction[] | null;
+  onClose: () => void;
+}) {
+  const side = useSideInsets();
+  return (
+    <Modal visible={actions !== null} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable
+        style={[styles.backdrop, { paddingLeft: 24 + side.left, paddingRight: 24 + side.right }]}
+        onPress={onClose}
+        accessibilityLabel="Close menu"
+      >
+        <Pressable style={styles.card} onPress={() => {}}>
+          <Text style={styles.title} numberOfLines={1}>
+            {title}
+          </Text>
+          <ScrollView style={styles.list}>
+            {(actions ?? []).map((action) => (
+              <Pressable
+                key={action.testID}
+                style={styles.row}
+                onPress={() => {
+                  onClose();
+                  action.onPress();
+                }}
+                accessibilityRole={action.selected === undefined ? 'button' : 'checkbox'}
+                accessibilityState={{ checked: action.selected }}
+                testID={action.testID}
+              >
+                <Text style={[styles.rowText, action.danger && styles.danger]}>{action.label}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 

@@ -377,6 +377,57 @@ export function FolderIcon({ open = false, ...props }: IconProps & { open?: bool
   );
 }
 
+/** A folder with a plus at its corner: Collections' new-folder button. */
+export function FolderPlusIcon(props: IconProps) {
+  return (
+    <IconFrame {...props}>
+      <path
+        d="M12.5 19H5.2c-1 0-1.7-.8-1.7-1.7V7.2c0-1 .8-1.7 1.7-1.7h4.1l2 2.2h7.5c1 0 1.7.8 1.7 1.7v3M3.5 10h17M18 15v6M15 18h6"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </IconFrame>
+  );
+}
+
+/** An outline map pin: every saved place, regardless of folder. */
+export function MapPinIcon(props: IconProps) {
+  return (
+    <IconFrame {...props}>
+      <path
+        d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0113 0c0 5.4-6.5 11-6.5 11z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="10" r="2.4" stroke="currentColor" strokeWidth="1.7" />
+    </IconFrame>
+  );
+}
+
+/** Directions sign: a turn arrow inside the diamond used by map apps (Android's twin). */
+export function DirectionsIcon(props: IconProps) {
+  return (
+    <IconFrame {...props}>
+      <path
+        d="M12 2.8L21.2 12 12 21.2 2.8 12z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M8.2 14.8v-2.2c0-1.5 1.2-2.7 2.7-2.7h4.2M12.8 7.6l2.4 2.3-2.4 2.3"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </IconFrame>
+  );
+}
+
 export function EyeIcon({ off = false, ...props }: IconProps & { off?: boolean }) {
   return (
     <IconFrame {...props}>

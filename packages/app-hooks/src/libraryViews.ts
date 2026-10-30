@@ -6,6 +6,7 @@ import {
   trackListLine,
   trackSummary,
   userTags,
+  visibleOnMap,
 } from '@atlas/core';
 import { isRoutingProfile, type RoutingProfile } from '@atlas/routing';
 import type { CollectionRecord, PlaceRecord, TrackRecord } from '@atlas/storage';
@@ -183,6 +184,40 @@ export const quickAccessTags = (place: Pick<PlaceRecord, 'tags'>): string[] =>
   isQuickAccess(place)
     ? place.tags.filter((tag) => tag !== QUICK_ACCESS_TAG)
     : [...place.tags, QUICK_ACCESS_TAG];
+
+/**
+ * Quick access is a handful of one-tap shortcuts, not another list: past this many it folds
+ * into a More tile instead of growing down the sheet.
+ */
+export const QUICK_ACCESS_LIMIT = 6;
+
+/**
+ * The Quick access tiles to draw. Up to the limit every pinned place shows; past it one slot
+ * goes to a More tile counting the rest, until the user opens it.
+ */
+export function quickAccessTiles<T extends Pick<PlaceRecord, 'tags'>>(
+  places: readonly T[],
+  expanded: boolean,
+): { shown: T[]; more: number } {
+  const pinned = places.filter(isQuickAccess);
+  if (expanded || pinned.length <= QUICK_ACCESS_LIMIT) return { shown: pinned, more: 0 };
+  const shown = pinned.slice(0, QUICK_ACCESS_LIMIT - 1);
+  return { shown, more: pinned.length - shown.length };
+}
+
+/**
+ * How many of a list's tracks the map draws — by their own eye and every folder above them.
+ * The Routes and Activities summary ("On map · 3 of 225") reports this instead of writing a
+ * visibility line under every row.
+ */
+export function libraryOnMapCount(
+  listed: readonly TrackRecord[],
+  tracks: readonly TrackRecord[],
+  collections: readonly CollectionRecord[],
+): number {
+  const drawn = new Set(visibleOnMap(tracks, collections).map((track) => track.id));
+  return listed.filter((track) => drawn.has(track.id)).length;
+}
 
 export function libraryPlaces(
   places: readonly PlaceRecord[],

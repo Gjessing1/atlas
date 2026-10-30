@@ -5,6 +5,9 @@ import {
   libraryVisibility,
   isQuickAccess,
   quickAccessTags,
+  quickAccessTiles,
+  libraryOnMapCount,
+  folderContentsLine,
   libraryTrackLine,
   libraryTrackTags,
   type LibraryPlaceSort,
@@ -28,12 +31,19 @@ import {
   folderHasPinLabels,
   tagHasPinLabels,
   garminSportIcon,
-  visibleOnMap,
   type CollectionRevealTarget,
 } from '@atlas/core';
 import type { ImportSummary, PlaceRecord, TrackRecord } from '@atlas/storage';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { EyeIcon, FolderIcon, PinLabelIcon } from './icons.js';
+import {
+  DirectionsIcon,
+  EyeIcon,
+  FolderIcon,
+  FolderPlusIcon,
+  LayersIcon,
+  MapPinIcon,
+  PinLabelIcon,
+} from './icons.js';
 import { CollectionMenu } from './sidebar/CollectionMenu.js';
 import { GarminCourses } from './settings/GarminCourses.js';
 import type { ConfirmRequest } from './sidebar/ConfirmDialog.js';
@@ -62,7 +72,7 @@ interface SidebarProps {
   onShowTrack: (track: TrackRecord) => void;
   /** Convert a stored/imported track into an editable snapped route. */
   onPlanTrack: (track: TrackRecord) => void;
-  /** Plan a trip to this place — the row's Go button (Android parity). */
+  /** Plan a trip to this place — a Quick access tile's arrow, or a row's Directions. */
   onGoToPlace: (place: PlaceRecord) => void;
   onImported: (result: ImportResult) => void;
   /** Resolve and persist an iNatur permit as a filled area overlay. */
@@ -191,6 +201,9 @@ function PinLabelToggle({
   );
 }
 
+/** What an unknown folder holds — nothing — for its contents line. */
+const EMPTY_FOLDER = { children: [], places: [], tracks: [] };
+
 export function Sidebar({
   data,
   garmin,
@@ -246,18 +259,24 @@ export function Sidebar({
   const [trackLimit, setTrackLimit] = useState(30);
   const [sport, setSport] = useState<string | null>(null);
   const [year, setYear] = useState<number | null>(null);
+  // Quick access: removing shortcuts is its own mode, and past six the rest fold away.
+  const [quickEditing, setQuickEditing] = useState(false);
+  const [quickExpanded, setQuickExpanded] = useState(false);
   const { drag, dropClass, dragProps, dropOnPlace, dropOnFolder } = useSidebarDnd(data);
+  // On Places a search finds folders and places wherever the user is (the tree or All
+  // places); tracks are found on their own tabs.
+  const placesTab = view === 'folders' || view === 'places';
   const filtered = useMemo(
     () =>
       filterCollectionRecords(
         {
           collections: data.collections,
           places: data.places,
-          tracks: view === 'places' ? [] : data.tracks,
+          tracks: placesTab && filter.trim() ? [] : data.tracks,
         },
         filter,
       ),
-    [data.collections, data.places, data.tracks, filter, view],
+    [data.collections, data.places, data.tracks, filter, placesTab],
   );
   const viewSource = useMemo(
     () => libraryTracks(data.tracks, view === 'activities' ? 'activities' : 'courses', null, null),
@@ -285,11 +304,10 @@ export function Sidebar({
     [filtered.places, data.collections, placeSort],
   );
   const sports = useMemo(() => librarySports(viewSource), [viewSource]);
-  // A listed track the map does not draw, by its own eye or a hidden folder above it.
-  const listedHidden = useMemo(() => {
-    const drawn = new Set(visibleOnMap(data.tracks, data.collections).map((track) => track.id));
-    return viewTracks.some((track) => !drawn.has(track.id));
-  }, [viewTracks, data.tracks, data.collections]);
+  const onMap = useMemo(
+    () => libraryOnMapCount(viewTracks, data.tracks, data.collections),
+    [viewTracks, data.tracks, data.collections],
+  );
   const years = useMemo(() => activityYears(viewSource), [viewSource]);
   // The whole vocabulary, not the filtered one: a filter narrows what is on
   // screen, never which tags an editor may offer.
@@ -458,8 +476,25 @@ export function Sidebar({
     }
   };
 
+  /** Right-click a row for its ⋯ menu, as a long-press opens it on Android. */
+  const openRowMenu = (event: React.MouseEvent<HTMLElement>) => {
+    const trigger = event.currentTarget.querySelector<HTMLButtonElement>(
+      '.collection-menu > button',
+    );
+    if (!trigger) return;
+    event.preventDefault();
+    trigger.click();
+  };
+
+  /**
+   * A place row: its pin, name and where it is filed, and the eye. Clicking the name shows it
+   * on the map with its card, where Directions is an explicit choice; the occasional actions
+   * wait in a ⋯ that recedes until the row is hovered.
+   */
   const placeRow = (place: PlaceRecord) => {
     const key = `place:${place.id}`;
+    const name = libraryPlaceName(place);
+    const mapState = libraryVisibility(place, data.collections);
     return (
       <li
         key={key}
@@ -470,6 +505,7 @@ export function Sidebar({
       >
         <div
           className={`item-line${dropClass(key)}${drag?.id === place.id ? ' dragging' : ''}`}
+          onContextMenu={openRowMenu}
           {...dragProps(
             key,
             'place',
@@ -489,27 +525,18 @@ export function Sidebar({
           <button
             type="button"
             className="item-name"
-            aria-label={libraryPlaceName(place)}
-            aria-description={`${libraryPlaceLine(place, data.collections)}. ${libraryVisibility(place, data.collections)}`}
+            aria-label={name}
+            aria-description={`${libraryPlaceLine(place, data.collections)}. ${mapState}`}
             onClick={() => onShowPlace(place)}
           >
-            {libraryPlaceName(place)}
+            {name}
             <span className="item-context">{libraryPlaceLine(place, data.collections)}</span>
-            <span className="item-map-state">{libraryVisibility(place, data.collections)}</span>
           </button>
           <span className="row-actions">
-            {/* Straight into the planner, as on Android. Without it the same
-                trip was row → card → Directions on this client alone. */}
-            <button
-              type="button"
-              className="row-go"
-              title={`Directions to ${place.name}`}
-              aria-label={`Directions to ${place.name}`}
-              onClick={() => onGoToPlace(place)}
-            >
-              Go
-            </button>
             <CollectionMenu title={place.name}>
+              <button type="button" onClick={() => onGoToPlace(place)}>
+                Directions
+              </button>
               <button
                 type="button"
                 aria-label={`Edit ${place.name}`}
@@ -523,17 +550,30 @@ export function Sidebar({
               >
                 {isQuickAccess(place) ? 'Remove from Quick access' : 'Pin to Quick access'}
               </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setConfirm({
+                    title: `Delete “${place.name}”?`,
+                    confirmLabel: 'Delete place',
+                    onConfirm: () => void data.deletePlace(place.id),
+                  })
+                }
+              >
+                Delete place…
+              </button>
             </CollectionMenu>
           </span>
           <button
             type="button"
             className="icon-button visibility-toggle"
-            title={place.visible ? 'Hide from map' : 'Show on map'}
+            // The tooltip says what the eye alone cannot: whether a folder hides it.
+            title={mapState}
             aria-label={`${place.visible ? 'Hide' : 'Show'} ${place.name} ${place.visible ? 'from' : 'on'} map`}
             aria-pressed={place.visible}
             onClick={() => void data.updatePlace(place.id, { visible: !place.visible })}
           >
-            <EyeIcon off={libraryVisibility(place, data.collections) !== 'On map'} size={18} />
+            <EyeIcon off={mapState !== 'On map'} size={18} />
           </button>
         </div>
         <TagChips tags={place.tags.filter((tag) => tag !== 'quick-access')} onPick={setFilter} />
@@ -561,15 +601,20 @@ export function Sidebar({
     );
   };
 
+  /**
+   * A track row: sport, name, the one line that tells runs apart, and the eye. Clicking the
+   * name frames it and opens its profile; editing, planning and export are in its ⋯.
+   */
   const trackRow = (track: TrackRecord) => {
     const key = `track:${track.id}`;
+    const mapState = libraryVisibility(track, data.collections);
     return (
       <li
         key={key}
         ref={revealItem?.kind === 'track' && track.id === revealItem.id ? revealRowRef : undefined}
         className={`item-row${selectedTrackId === track.id ? ' selected' : ''}${key === highlighted ? ' revealed' : ''}`}
       >
-        <div className="item-line">
+        <div className="item-line" onContextMenu={openRowMenu}>
           <span className="row-indent" aria-hidden="true" />
           <span className="item-icon track-icon" aria-hidden="true">
             {garminSportIcon(libraryTrackSport(track))}
@@ -578,33 +623,53 @@ export function Sidebar({
             type="button"
             className="item-name"
             aria-label={track.name}
-            aria-description={`${libraryTrackLine(track)}. ${libraryVisibility(track, data.collections)}`}
+            aria-description={`${libraryTrackLine(track)}. ${mapState}`}
             onClick={() => onShowTrack(track)}
           >
             {track.name}
             <span className="item-context">{libraryTrackLine(track)}</span>
-            <span className="item-map-state">{libraryVisibility(track, data.collections)}</span>
           </button>
           <span className="row-actions">
-            <button
-              type="button"
-              className="icon-button"
-              aria-label={`Edit ${track.name}`}
-              aria-expanded={expanded === key}
-              onClick={() => toggleExpanded(key)}
-            >
-              ✎
-            </button>
+            <CollectionMenu title={track.name}>
+              <button
+                type="button"
+                aria-label={`Edit ${track.name}`}
+                onClick={() => toggleExpanded(key)}
+              >
+                Edit
+              </button>
+              <button type="button" onClick={() => onPlanTrack(track)}>
+                Plan as route
+              </button>
+              <button type="button" onClick={() => void data.exportTrack(track.id, 'gpx')}>
+                Download GPX
+              </button>
+              <button type="button" onClick={() => void data.exportTrack(track.id, 'kml')}>
+                Download KML
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setConfirm({
+                    title: `Delete “${track.name}”?`,
+                    confirmLabel: 'Delete track',
+                    onConfirm: () => void data.deleteTrack(track.id),
+                  })
+                }
+              >
+                Delete…
+              </button>
+            </CollectionMenu>
           </span>
           <button
             type="button"
             className="icon-button visibility-toggle"
-            title={track.visible ? 'Hide from map' : 'Show on map'}
+            title={mapState}
             aria-label={`${track.visible ? 'Hide' : 'Show'} ${track.name} ${track.visible ? 'from' : 'on'} map`}
             aria-pressed={track.visible}
             onClick={() => void data.updateTrack(track.id, { visible: !track.visible })}
           >
-            <EyeIcon off={libraryVisibility(track, data.collections) !== 'On map'} size={18} />
+            <EyeIcon off={mapState !== 'On map'} size={18} />
           </button>
         </div>
         <TagChips tags={libraryTrackTags(track)} onPick={setFilter} />
@@ -623,19 +688,6 @@ export function Sidebar({
                 confirmLabel: 'Delete track',
                 onConfirm: () => void data.deleteTrack(track.id),
               })
-            }
-            actions={
-              <>
-                <button type="button" onClick={() => void data.exportTrack(track.id, 'gpx')}>
-                  Download GPX
-                </button>
-                <button type="button" onClick={() => void data.exportTrack(track.id, 'kml')}>
-                  Download KML
-                </button>
-                <button type="button" onClick={() => onPlanTrack(track)}>
-                  Plan as route
-                </button>
-              </>
             }
           />
         )}
@@ -808,28 +860,57 @@ export function Sidebar({
                     <PinLabelIcon size={18} />
                     Show labels
                   </button>
-                  <button
-                    type="button"
-                    className="icon-button visibility-toggle"
-                    title={folder.visible ? 'Hide collection from map' : 'Show collection on map'}
-                    aria-label={`${folder.visible ? 'Hide' : 'Show'} collection ${folder.name} ${folder.visible ? 'from' : 'on'} map`}
-                    aria-pressed={folder.visible}
-                    onClick={() => void data.setCollectionVisible(folder.id, !folder.visible)}
-                  >
-                    <EyeIcon off={!folder.visible} size={18} /> Show on map
-                  </button>
                 </CollectionMenu>
+                {/* Showing or hiding a folder is a map setting; what is filed in it stays. */}
+                <button
+                  type="button"
+                  className="icon-button visibility-toggle"
+                  title={libraryVisibility(
+                    { visible: folder.visible, collectionId: folder.parentId },
+                    data.collections,
+                  )}
+                  aria-label={`${folder.visible ? 'Hide' : 'Show'} collection ${folder.name} ${folder.visible ? 'from' : 'on'} map`}
+                  aria-pressed={folder.visible}
+                  onClick={() => void data.setCollectionVisible(folder.id, !folder.visible)}
+                >
+                  <EyeIcon off={!folder.visible} size={18} />
+                </button>
               </div>
-              <div className="folder-context">
-                {libraryVisibility(
-                  { visible: folder.visible, collectionId: folder.parentId },
-                  data.collections,
-                )}
-              </div>
+              {!open && (
+                <div className="folder-context">
+                  {folderContentsLine(tree.byId.get(folder.id) ?? EMPTY_FOLDER)}
+                </div>
+              )}
               {open && branch(folder.id, depth + 1)}
             </li>
           );
         })}
+        {parentId === null && !filtered.active && (
+          <>
+            <li className="all-places-row">
+              <button
+                type="button"
+                aria-label="All places"
+                aria-description={`${data.places.length} saved`}
+                onClick={() => setView('places')}
+              >
+                <MapPinIcon size={18} />
+                <span>
+                  All places
+                  <small>
+                    {data.places.length} {data.places.length === 1 ? 'place' : 'places'}
+                  </small>
+                </span>
+                <span aria-hidden="true">›</span>
+              </button>
+            </li>
+            {places.length + tracks.length > 0 && (
+              <li>
+                <h4 className="sidebar-section-label">Not in a folder</h4>
+              </li>
+            )}
+          </>
+        )}
         {places.slice(0, placeLimit).map(placeRow)}
         {places.length > placeLimit && (
           <li>
@@ -850,43 +931,104 @@ export function Sidebar({
     );
   };
 
-  const renderQuickAccess = () => (
-    <div className="quick-access">
-      <h4>Quick access</h4>
-      {data.places.some(isQuickAccess) ? (
-        <ul className="item-list">
-          {data.places.filter(isQuickAccess).map((place) => (
-            <li className="item-line" key={`quick:${place.id}`}>
-              <button
-                type="button"
-                className="item-name"
-                aria-label={libraryPlaceName(place)}
-                onClick={() => onShowPlace(place)}
-              >
-                {place.icon} {libraryPlaceName(place)}
-              </button>
-              <CollectionMenu title={`Quick access ${libraryPlaceName(place)}`}>
+  /**
+   * Quick access: a few personal shortcuts as tiles. A tile shows the place with its card; its
+   * arrow plans the way there in one click. Pinning is a tag on the place, so a shortcut
+   * stays filed in its folder and is never a second copy.
+   */
+  const renderQuickAccess = () => {
+    const { shown, more } = quickAccessTiles(data.places, quickExpanded);
+    const editing = quickEditing && shown.length > 0;
+    return (
+      <section className="quick-access" aria-label="Quick access">
+        <div className="sidebar-section-head">
+          <h4>Quick access</h4>
+          {shown.length > 0 && (
+            <button type="button" className="text-link" onClick={() => setQuickEditing((v) => !v)}>
+              {editing ? 'Done' : 'Edit'}
+            </button>
+          )}
+        </div>
+        {shown.length === 0 ? (
+          <p className="settings-note">
+            Pin a saved place here from its ⋯ menu for one-click access.
+          </p>
+        ) : (
+          <ul className="quick-tiles">
+            {shown.map((place) => {
+              const name = libraryPlaceName(place);
+              return (
+                <li key={`quick:${place.id}`} className="quick-tile">
+                  <button
+                    type="button"
+                    className="quick-tile-main"
+                    disabled={editing}
+                    aria-label={name}
+                    title={`Show ${name} on the map`}
+                    onClick={() => onShowPlace(place)}
+                  >
+                    <span className="quick-tile-icon" style={{ background: place.color }}>
+                      {place.icon}
+                    </span>
+                    <span className="quick-tile-name">{name}</span>
+                  </button>
+                  {editing ? (
+                    <button
+                      type="button"
+                      className="quick-tile-corner remove"
+                      aria-label={`Remove ${name} from Quick access`}
+                      onClick={() =>
+                        void data.updatePlace(place.id, { tags: quickAccessTags(place) })
+                      }
+                    >
+                      ✕
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="quick-tile-corner"
+                      aria-label={`Directions to ${name}`}
+                      title={`Directions to ${name}`}
+                      onClick={() => onGoToPlace(place)}
+                    >
+                      <DirectionsIcon size={18} />
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+            {more > 0 && (
+              <li className="quick-tile">
                 <button
                   type="button"
-                  onClick={() => void data.updatePlace(place.id, { tags: quickAccessTags(place) })}
+                  className="quick-tile-main"
+                  onClick={() => setQuickExpanded(true)}
                 >
-                  Remove from Quick access
+                  <span className="quick-tile-icon more">⋯</span>
+                  <span className="quick-tile-name">{more} more</span>
                 </button>
-              </CollectionMenu>
-              <button
-                type="button"
-                className="row-go"
-                aria-label={`Quick directions to ${place.name}`}
-                onClick={() => onGoToPlace(place)}
-              >
-                Go
-              </button>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="settings-note">Pin Home, Work or any place here from its ⋯ menu.</p>
-      )}
+              </li>
+            )}
+          </ul>
+        )}
+      </section>
+    );
+  };
+
+  /** The Folders heading, with its new-folder button where the mockup puts it. */
+  const renderFoldersHead = () => (
+    <div className="sidebar-section-head">
+      <h4>Folders</h4>
+      <button
+        type="button"
+        className="icon-button"
+        aria-label="New folder"
+        title="New folder"
+        disabled={data.status !== 'ready'}
+        onClick={() => startCreating(null)}
+      >
+        <FolderPlusIcon size={18} />
+      </button>
     </div>
   );
 
@@ -937,13 +1079,6 @@ export function Sidebar({
             )}
             <button
               type="button"
-              onClick={() => startCreating(null)}
-              disabled={data.status !== 'ready'}
-            >
-              New folder
-            </button>
-            <button
-              type="button"
               onClick={() => {
                 setView('folders');
                 setReordering((value) => !value);
@@ -964,7 +1099,29 @@ export function Sidebar({
           hidden
           onChange={(e) => void onImportFiles(e.target.files)}
         />
-        {(view === 'folders' || view === 'places' || viewSource.length > 0) && (
+        <div className="library-tabs" role="tablist" aria-label="Collections view">
+          {(['folders', 'courses', 'activities'] as const).map((item) => {
+            const on = view === item || (item === 'folders' && placesTab);
+            return (
+              <button
+                key={item}
+                type="button"
+                role="tab"
+                aria-selected={on}
+                className={`library-tab${on ? ' active' : ''}`}
+                onClick={() => {
+                  setView(item);
+                  setSport(null);
+                  setYear(null);
+                  setQuickEditing(false);
+                }}
+              >
+                {{ folders: 'Places', courses: 'Routes', activities: 'Activities' }[item]}
+              </button>
+            );
+          })}
+        </div>
+        {(placesTab || viewSource.length > 0) && (
           <div className="sidebar-filter">
             <input
               type="search"
@@ -977,9 +1134,11 @@ export function Sidebar({
                 }
               }}
               placeholder={
-                view === 'folders' || view === 'places'
-                  ? 'Search folders and places'
-                  : 'Search name, #tag or notes'
+                placesTab
+                  ? 'Search saved places'
+                  : view === 'activities'
+                    ? 'Search activities'
+                    : 'Search routes'
               }
               aria-label="Filter collections"
             />
@@ -1002,63 +1161,26 @@ export function Sidebar({
             )}
           </div>
         )}
-        <div className="library-tabs" role="tablist" aria-label="Collections view">
-          {(['folders', 'courses', 'activities'] as const).map((item) => (
-            <button
-              key={item}
-              type="button"
-              role="tab"
-              aria-selected={view === item || (item === 'folders' && view === 'places')}
-              className={`route-chip${view === item || (item === 'folders' && view === 'places') ? ' active' : ''}`}
-              onClick={() => {
-                setView(item);
-                setSport(null);
-                setYear(null);
-              }}
-            >
-              {
-                {
-                  folders: 'Places',
-                  places: 'Places',
-                  courses: 'Routes',
-                  activities: 'Activities',
-                }[item]
-              }
-            </button>
-          ))}
-        </div>
-        {(view === 'folders' || view === 'places') && (
+        {view === 'places' && !filtered.active && (
           <div className="places-navigation">
             <button
               type="button"
-              className={`route-chip${view === 'folders' ? ' active' : ''}`}
-              aria-pressed={view === 'folders'}
+              className="icon-button"
+              aria-label="Back to Places"
               onClick={() => setView('folders')}
             >
-              Folders
+              ‹
             </button>
-            <button
-              type="button"
-              className={`route-chip${view === 'places' ? ' active' : ''}`}
-              aria-pressed={view === 'places'}
-              onClick={() => setView('places')}
+            <strong>All places</strong>
+            <select
+              aria-label="Sort places"
+              value={placeSort}
+              onChange={(event) => setPlaceSort(event.target.value as LibraryPlaceSort)}
             >
-              All places
-            </button>
-            {view === 'places' && (
-              <label>
-                Sort{' '}
-                <select
-                  aria-label="Sort places"
-                  value={placeSort}
-                  onChange={(event) => setPlaceSort(event.target.value as LibraryPlaceSort)}
-                >
-                  <option value="name">Name</option>
-                  <option value="recent">Recently added</option>
-                  <option value="folder">Folder</option>
-                </select>
-              </label>
-            )}
+              <option value="name">Name</option>
+              <option value="recent">Recently added</option>
+              <option value="folder">Folder</option>
+            </select>
           </div>
         )}
         {reordering && (
@@ -1070,9 +1192,38 @@ export function Sidebar({
           </div>
         )}
         {(view === 'courses' || view === 'activities') && viewSource.length > 0 && (
-          <div className="library-filters">
-            <label>
-              Sort{' '}
+          <>
+            <div className="library-filters">
+              {sports.length > 0 && (
+                <select
+                  aria-label="Library sport"
+                  value={sport ?? ''}
+                  onChange={(event) => setSport(event.target.value || null)}
+                >
+                  <option value="">Sport</option>
+                  {sports.map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {view === 'activities' && years.length > 0 && (
+                <select
+                  aria-label="Activity year"
+                  value={year ?? ''}
+                  onChange={(event) =>
+                    setYear(event.target.value ? Number(event.target.value) : null)
+                  }
+                >
+                  <option value="">Year</option>
+                  {years.map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </select>
+              )}
               <select
                 aria-label="Sort tracks"
                 value={trackSort}
@@ -1083,67 +1234,51 @@ export function Sidebar({
                 <option value="name">Name</option>
                 <option value="distance">Longest first</option>
               </select>
-            </label>
-            <label>
-              Sport
-              <select
-                aria-label="Library sport"
-                value={sport ?? ''}
-                onChange={(event) => setSport(event.target.value || null)}
-              >
-                <option value="">All sports</option>
-                {sports.map((item) => (
-                  <option key={item} value={item}>
-                    {item}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {view === 'activities' && (
-              <label>
-                Year
-                <select
-                  aria-label="Activity year"
-                  value={year ?? ''}
-                  onChange={(event) =>
-                    setYear(event.target.value ? Number(event.target.value) : null)
-                  }
-                >
-                  <option value="">All years</option>
-                  {years.map((item) => (
-                    <option key={item} value={item}>
-                      {item}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            <div className="library-visibility" role="group" aria-label="Tracks on map">
-              <button
-                type="button"
-                disabled={viewTracks.length === 0}
-                title={
-                  listedHidden ? 'Show every listed track on the map' : 'Hide every listed track'
-                }
-                onClick={() =>
-                  void data.setTracksVisible(
-                    viewTracks.map((track) => track.id),
-                    listedHidden,
-                  )
-                }
-              >
-                {listedHidden ? 'Show all' : 'Hide all'}
-              </button>
-              <button
-                type="button"
-                disabled={viewTracks.length === 0}
-                title="Show the listed tracks and hide every other track"
-                onClick={() => void data.showOnlyTracks(viewTracks.map((track) => track.id))}
-              >
-                Show filtered on map
-              </button>
             </div>
-          </div>
+            {/* How much of the list is drawn, in one line; showing or hiding all of it is
+                under Manage — the tab is for finding a track, not running a map layer. */}
+            <div className="library-on-map">
+              <LayersIcon size={18} />
+              <span>
+                On map · {onMap} of {viewTracks.length}
+              </span>
+              {viewTracks.length > 0 && (
+                <CollectionMenu
+                  label="Manage"
+                  title={view === 'activities' ? 'activities on the map' : 'routes on the map'}
+                >
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void data.setTracksVisible(
+                        viewTracks.map((track) => track.id),
+                        true,
+                      )
+                    }
+                  >
+                    Show all {viewTracks.length} on map
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void data.setTracksVisible(
+                        viewTracks.map((track) => track.id),
+                        false,
+                      )
+                    }
+                  >
+                    Hide all {viewTracks.length} from map
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void data.showOnlyTracks(viewTracks.map((track) => track.id))}
+                  >
+                    Show only these {viewTracks.length}, hide other tracks
+                  </button>
+                </CollectionMenu>
+              )}
+            </div>
+          </>
         )}
       </div>
       {importOpen && (
@@ -1264,11 +1399,11 @@ export function Sidebar({
           (view === 'folders' || (view === 'places' && filtered.active) ? (
             <>
               {!filtered.active && renderQuickAccess()}
+              {!filtered.active && renderFoldersHead()}
               {branch(null, 0)}
             </>
           ) : (
             <>
-              {view === 'places' && !filtered.active && renderQuickAccess()}
               {view === 'activities' && garmin.connected && (
                 <div className="garmin-courses-head">
                   <h4>From Garmin Connect</h4>

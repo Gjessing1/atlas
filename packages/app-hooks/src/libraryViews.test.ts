@@ -9,6 +9,8 @@ import {
   libraryVisibility,
   isQuickAccess,
   quickAccessTags,
+  quickAccessTiles,
+  libraryOnMapCount,
   plannedRouteMetadata,
   activityYear,
   activityYearCounts,
@@ -191,4 +193,34 @@ it('new planner routes retain travel mode and estimated duration without exposin
   expect(libraryTrackLine(saved)).toContain('Cycling');
   expect(libraryTrackTags(saved)).toEqual([]);
   expect(plannedRouteMetadata({ profile: 'car', durationMs: NaN }).stats).toEqual({});
+});
+
+it('folds Quick access past six shortcuts into a More tile', () => {
+  const pinned = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ id: `p${i}`, tags: ['quick-access'] }));
+  expect(quickAccessTiles([...pinned(6), { id: 'loose', tags: [] }], false)).toEqual({
+    shown: pinned(6),
+    more: 0,
+  });
+  const many = pinned(9);
+  expect(quickAccessTiles(many, false)).toEqual({ shown: many.slice(0, 5), more: 4 });
+  expect(quickAccessTiles(many, true)).toEqual({ shown: many, more: 0 });
+});
+
+it('counts listed tracks the map draws, including a hidden folder above them', () => {
+  const folder: CollectionRecord = {
+    id: 'runs',
+    name: 'Runs',
+    parentId: null,
+    visible: false,
+    sortIndex: 0,
+    createdAt: 0,
+    updatedAt: 0,
+  };
+  const shown = track('shown', [], '', 1);
+  const hidden = { ...track('hidden', [], '', 2), visible: false };
+  const filed = { ...track('filed', [], '', 3), collectionId: 'runs' };
+  const all = [shown, hidden, filed];
+  expect(libraryOnMapCount(all, all, [folder])).toBe(1);
+  expect(libraryOnMapCount([hidden, filed], all, [{ ...folder, visible: true }])).toBe(1);
 });

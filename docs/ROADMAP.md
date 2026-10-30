@@ -51,7 +51,10 @@ dissolved into Routes & courses, Activities and Places. What remains:
       - **Views over the same records:** Places (Folders / All places with pinned Quick access),
         Routes and Activities exist on both clients. Garmin has no tab of its own (v0.254.0): its remote courses list under Routes
         & courses, the import status/check sits atop Activities, Explore GPX locations under
-        Places. Sport/year filters, a per-view Show all / Hide all and Show filtered on map exist; iNatur
+        Places. Places opens on Quick access tiles (tap shows, arrow plans, More past six), the
+        folders and an All places row; one search covers folders and places. Rows are tap-to-reveal
+        with actions on long-press (web: ⋯ / right-click); Routes and Activities show one
+        "On map · X of N" line with bulk Show/Hide/Show only these under Manage. Sport/year filters exist; iNatur
         permit areas (old saves included) are kept out of Routes & courses. New Atlas routes retain travel mode and estimated duration; places sort by name, recent
         additions or folder, tracks by newest/oldest, name or distance. Still needed: proximity
         to the map view.

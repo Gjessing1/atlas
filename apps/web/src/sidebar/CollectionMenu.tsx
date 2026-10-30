@@ -1,8 +1,19 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 
-/** Named actions in a portal so a long folder cannot clip its last row's menu. */
-export function CollectionMenu({ title, children }: { title: string; children: ReactNode }) {
+/**
+ * Named actions in a portal so a long folder cannot clip its last row's menu. The trigger is
+ * "⋯", or a word (`label`, e.g. "Manage") where the menu is a summary's rather than a row's.
+ */
+export function CollectionMenu({
+  title,
+  label,
+  children,
+}: {
+  title: string;
+  label?: string;
+  children: ReactNode;
+}) {
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0 });
   const root = useRef<HTMLSpanElement>(null);
@@ -59,12 +70,12 @@ export function CollectionMenu({ title, children }: { title: string; children: R
       <button
         ref={trigger}
         type="button"
-        className="icon-button"
-        aria-label={`More actions for ${title}`}
+        className={label ? 'collection-menu-label' : 'icon-button'}
+        aria-label={label ? `${label} ${title}` : `More actions for ${title}`}
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        ⋯
+        {label ?? '⋯'}
       </button>
       {open &&
         createPortal(

@@ -626,6 +626,53 @@ export function ShareIcon({ color = DEFAULT_COLOR, size = 18 }: ModeIconProps) {
   );
 }
 
+/** A folder: tab on the left, body below — Collections' folder rows. */
+export function FolderIcon({ color = DEFAULT_COLOR, size = 22 }: ModeIconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path
+        d="M3.5 7.2c0-1 .8-1.7 1.7-1.7h4.1l2 2.2h7.5c1 0 1.7.8 1.7 1.7v8.4c0 1-.8 1.7-1.7 1.7H5.2c-1 0-1.7-.8-1.7-1.7zM3.5 10h17"
+        stroke={color}
+        strokeWidth={1.7}
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </Svg>
+  );
+}
+
+/** A folder with a plus at its corner: make a new one. */
+export function FolderPlusIcon({ color = DEFAULT_COLOR, size = 22 }: ModeIconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path
+        d="M12.5 19H5.2c-1 0-1.7-.8-1.7-1.7V7.2c0-1 .8-1.7 1.7-1.7h4.1l2 2.2h7.5c1 0 1.7.8 1.7 1.7v3M3.5 10h17M18 15v6M15 18h6"
+        stroke={color}
+        strokeWidth={1.7}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </Svg>
+  );
+}
+
+/** An outline map pin: every saved place, regardless of folder. */
+export function MapPinIcon({ color = DEFAULT_COLOR, size = 22 }: ModeIconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path
+        d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0113 0c0 5.4-6.5 11-6.5 11z"
+        stroke={color}
+        strokeWidth={1.7}
+        strokeLinejoin="round"
+        fill="none"
+      />
+      <Circle cx={12} cy={10} r={2.4} stroke={color} strokeWidth={1.7} fill="none" />
+    </Svg>
+  );
+}
+
 type ModeIcon = (props: ModeIconProps) => React.ReactElement;
 
 /**

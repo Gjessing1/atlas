@@ -473,7 +473,7 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     id: 'collections-visibility',
     surface: 'collections',
     capability: 'Show or hide an individual place, track or a whole folder on the map',
-    web: { file: 'apps/web/src/Sidebar.tsx', contains: 'Hide collection from map' },
+    web: { file: 'apps/web/src/Sidebar.tsx', contains: 'data.setCollectionVisible(folder.id' },
     android: { file: 'apps/android/src/ui/FavoritesSheet.tsx', contains: 'onSetFolderVisible' },
   },
   {
