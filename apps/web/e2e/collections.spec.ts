@@ -472,12 +472,8 @@ test('Places offers Quick access, human context, sorting, and clear inherited vi
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: 'test-results/collections-places-mobile.png' });
   await page.setViewportSize({ width: 1280, height: 720 });
-  // A tile shows the place; its arrow is the one-click way there; Edit unpins.
-  await expect(
-    quick.getByRole('button', {
-      name: 'Directions to Home with a long and recognizable place name',
-    }),
-  ).toBeVisible();
+  // A tile is one target — it shows the place and its card, like a row; Edit unpins.
+  await expect(quick.getByRole('button', { name: /^Directions to/ })).toHaveCount(0);
   // Pinned is not moved: the place is still filed in Family.
   await page.getByRole('button', { name: 'Expand Family' }).click();
   await expect(page.locator('.folder-row .item-name')).toContainText([/Home with a long/]);

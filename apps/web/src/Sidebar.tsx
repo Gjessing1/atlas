@@ -36,7 +36,6 @@ import {
 import type { ImportSummary, PlaceRecord, TrackRecord } from '@atlas/storage';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  DirectionsIcon,
   EyeIcon,
   FolderIcon,
   FolderPlusIcon,
@@ -72,7 +71,7 @@ interface SidebarProps {
   onShowTrack: (track: TrackRecord) => void;
   /** Convert a stored/imported track into an editable snapped route. */
   onPlanTrack: (track: TrackRecord) => void;
-  /** Plan a trip to this place — a Quick access tile's arrow, or a row's Directions. */
+  /** Plan a trip to this place — a row menu's Directions. */
   onGoToPlace: (place: PlaceRecord) => void;
   onImported: (result: ImportResult) => void;
   /** Resolve and persist an iNatur permit as a filled area overlay. */
@@ -932,9 +931,10 @@ export function Sidebar({
   };
 
   /**
-   * Quick access: a few personal shortcuts as tiles. A tile shows the place with its card; its
-   * arrow plans the way there in one click. Pinning is a tag on the place, so a shortcut
-   * stays filed in its folder and is never a second copy.
+   * Quick access: a few personal shortcuts as tiles. A tile does what every row does — shows
+   * the place with its card, whose Directions is the way there — so each tile is one target.
+   * Pinning is a tag on the place, so a shortcut stays filed in its folder and is never a
+   * second copy.
    */
   const renderQuickAccess = () => {
     const { shown, more } = quickAccessTiles(data.places, quickExpanded);
@@ -983,17 +983,7 @@ export function Sidebar({
                     >
                       ✕
                     </button>
-                  ) : (
-                    <button
-                      type="button"
-                      className="quick-tile-corner"
-                      aria-label={`Directions to ${name}`}
-                      title={`Directions to ${name}`}
-                      onClick={() => onGoToPlace(place)}
-                    >
-                      <DirectionsIcon size={18} />
-                    </button>
-                  )}
+                  ) : null}
                 </li>
               );
             })}

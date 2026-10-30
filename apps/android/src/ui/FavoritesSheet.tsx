@@ -67,7 +67,7 @@ import { ReorderableList } from './ReorderableList';
 import { PinLabelIcon } from './icons';
 import { ActionMenu, ActionSheet, FilterMenu, type MenuAction } from './FilterMenu';
 import { GarminCourses } from './GarminCourses';
-import { DirectionsIcon, FolderIcon, FolderPlusIcon, LayersIcon, MapPinIcon } from './modeIcons';
+import { FolderIcon, FolderPlusIcon, LayersIcon, MapPinIcon } from './modeIcons';
 import { theme } from './theme';
 
 /** Tracks a folder level draws before its "Show more" button. */
@@ -535,7 +535,7 @@ export function FavoritesSheet({
   pinLabels: PinLabelsController;
   /** Reveal a place on the map with its card — what tapping a row or a tile does. */
   onFlyTo: (place: PlaceRecord) => void;
-  /** Plan a route there now: a Quick access tile's arrow, or a row's Directions. */
+  /** Plan a route there now: a row's long-press Directions. */
   onNavigate: (place: PlaceRecord) => void;
   /** Patch a place (the editor batches its fields behind an explicit Save). */
   onPatch: (id: string, patch: EditablePlacePatch) => void;
@@ -1306,8 +1306,9 @@ export function FavoritesSheet({
   );
 
   /**
-   * Quick access: a few personal shortcuts as tiles, two to a row. A tile shows the place on
-   * the map; its arrow plans the way there in one tap. Pinning is a tag on the place itself,
+   * Quick access: a few personal shortcuts as tiles, two to a row. A tile does what every row
+   * does — shows the place on the map with its card, whose Directions is the way there — so
+   * each tile is one target, not two. Pinning is a tag on the place itself,
    * so a shortcut stays filed in its folder and is never a second copy.
    */
   const quickAccess = (): ReactNode => {
@@ -1366,20 +1367,7 @@ export function FavoritesSheet({
                     >
                       <Text style={styles.tileRemove}>✕</Text>
                     </Pressable>
-                  ) : (
-                    <Pressable
-                      style={styles.tileCorner}
-                      onPress={() => {
-                        onNavigate(place);
-                        onClose();
-                      }}
-                      hitSlop={6}
-                      accessibilityLabel={`Directions to ${name}`}
-                      testID={`quick-go-${place.id}`}
-                    >
-                      <DirectionsIcon color={theme.accent} size={22} />
-                    </Pressable>
-                  )}
+                  ) : null}
                 </View>
               );
             })}
@@ -2157,8 +2145,8 @@ const styles = StyleSheet.create({
   // Quick access: two compact tiles to a row, so six shortcuts take three rows at most.
   tileGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 8 },
   tile: { width: '48.5%', borderRadius: 14, backgroundColor: theme.surfaceMuted },
-  // Top row: the place's own badge (as on its row) left, Directions right; the name
-  // gets the tile's full width underneath instead of wrapping around the arrow.
+  // The place's own badge (as on its row) above its name, which gets the full width; in
+  // Edit the corner holds the unpin ✕.
   tileMain: { minHeight: 84, paddingHorizontal: 12, paddingTop: 10, paddingBottom: 12, gap: 8 },
   tileBadge: {
     width: 32,

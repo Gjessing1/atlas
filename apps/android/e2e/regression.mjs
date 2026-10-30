@@ -746,7 +746,6 @@ async function verifyCollectionBrowsing({ placeId, folderId }) {
   await longPress(`favorite-${placeId}`);
   await tap(`favorite-quick-${placeId}`);
   await waitForId(`quick-place-${placeId}`);
-  expectIds(hierarchy(), [`quick-go-${placeId}`]);
   // Moving and reordering are management: only in Reorder does holding drag.
   await tap('collections-more');
   await tap('collections-reorder');
@@ -796,8 +795,9 @@ function isChecked(node) {
   return Boolean(node?.includes('checked="true"') || node?.includes('selected="true"'));
 }
 
-// Planning starts the one-tap way: a Quick access tile's arrow plans from a GPS
-// fix to the place — a fix this AVD often never delivers, even with a `geo fix` set.
+// Planning starts where a user starts it: a Quick access tile opens the place's
+// card, and its Directions plans from a GPS fix to the place — a fix this AVD
+// often never delivers, even with a `geo fix` set.
 // So wait out the lookup (8 s, then last-known), and if the plan still has
 // only the place, give it a second stop with a map tap, which a plan takes as
 // a stop. Not through the stop box: injected keys are this AVD's least
@@ -807,7 +807,8 @@ function isChecked(node) {
 // depends on GPS timing.
 async function openRouteFromSavedPlace(placeId) {
   await openCollectionsAtRoot();
-  await tap(`quick-go-${placeId}`);
+  await tap(`quick-place-${placeId}`);
+  await tap('destination-navigate');
   await waitForId('route-sheet');
   const settled = await waitFor(
     'the Directions origin lookup to settle',

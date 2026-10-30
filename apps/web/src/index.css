@@ -8338,8 +8338,8 @@ button.transit-notice-summary {
 .quick-tile-main:disabled {
   cursor: default;
 }
-/* The tile's top row: the place's own badge (as on its row) left, Directions right; the
-   name gets the full width underneath instead of wrapping around the arrow. */
+/* The place's own badge (as on its row) above its name, which gets the full width; in Edit
+   the corner holds the unpin ✕. */
 .quick-tile-icon {
   display: inline-flex;
   align-items: center;
