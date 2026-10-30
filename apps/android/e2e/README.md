@@ -298,6 +298,14 @@ before that destination. Also:
   in `regression.mjs`. The device regression checks a map tap, point-list actions and undo; the
   web `planner.spec.ts` checks line insertion and dragging until an Android driver can locate
   native annotations without UiAutomator.
+- **A map-layer bug kills the app natively, with no JavaScript error.** v0.257–0.258 closed the
+  app on Explore (and on whatever sheet opened while its results stayed drawn) with
+  `libc++abi: terminating due to uncaught exception of type mapbox::util::bad_variant_access`
+  and `Fatal signal 6` on a `Worker` thread: a LineString had been put into a _clustered_
+  GeoJSON source, and MapLibre Native's clustering reads every feature as a point. Grep logcat
+  for `libc++abi|Fatal signal` when the app vanishes, not only for `ReactNativeJS`. It needed two
+  Explore results within 12 m — routine against the live POIs on a real phone, absent from the
+  fixture — so the regression never hit it; a clustered source must hold Points only.
 - **Check the clock.** A restored snapshot has come back 17 hours behind, which breaks every
   countdown and "N min ago". Compare `adb shell date` with the host's before judging anything with
   a time in it.
