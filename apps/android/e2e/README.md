@@ -177,7 +177,7 @@ delivering `onChangeText`. The same day dropped keys on three different fields
 1-minute load of 2–3.
 
 So **don't add typing to a scenario that can avoid it.** Reach state by a tap where one exists (a
-map tap adds a planner stop; a saved place's "Go" opens its card) and keep typing for the steps
+map tap adds a planner stop; a saved place's row or Quick access tile opens its card) and keep typing for the steps
 that are _about_ search. Every typed step is another chance to lose a 25-minute run.
 
 ### Location: the AVD rarely delivers a fix
@@ -188,7 +188,11 @@ my location_ then lacks its start: Directions on a place card opens the planner 
 destination and explicitly asks for a start. The next searched or map-tapped stop is inserted
 before that destination. Also:
 
-- **Favorites "Go" opens the place's card, not the planner** — tap `destination-navigate` next.
+- **A saved place's row or Quick access tile opens its card, not the planner** — tap
+  `destination-navigate` next. There is no Go button since v0.259.0.
+- **Collections row actions are a long-press** (`longPress(id)` in `regression.mjs`: an
+  `input swipe` in place for 900 ms), and holding a row drags it only after Reorder — outside
+  Reorder the same hold opens the row's menu instead.
 - **Wait out the lookup before acting on the plan**, or a late fix and your own edit race: the fix
   only ever fills a one-stop plan, so adding the second stop yourself retires it.
   `openRouteFromSavedPlace` does both, adding the stop with a map tap above the sheet. The fixture
