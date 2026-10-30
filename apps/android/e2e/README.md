@@ -19,8 +19,8 @@ ATLAS_ANDROID_BACKEND=ally-x \
   infrastructure/packs/publish-update.sh
 ```
 
-Budget ~7 min for a regression on the Ally-X worker (~20 min on this host's AVD), plus ~10 min
-when it has to build the APK itself. The native script requires a clean committed worktree and
+Budget ~7 min for a regression on the Ally-X worker (~13 min on this host's AVD since its 32 GB
+upgrade, measured 2026-10-30; ~20 min before), plus ~10 min when it has to build the APK itself. The native script requires a clean committed worktree and
 the same commit deployed at `/api/health`; it checks the APK's package and version before
 starting the device. **When a run fails and you change only `regression.mjs` (or the fixture server), reuse the APK**: the app has
 not changed, so rebuilding it buys nothing. On 2026-09-17 three retries that each fixed only the
@@ -125,6 +125,10 @@ before on the same code.
   cached `alpine:3` image in a short-lived privileged Docker container as a fallback. It does
   not pull an image during a release. If the image is absent or RAM is insufficient, it stops
   before the emulator starts and says what to fix.
+- **"An Android device is running" can be another project's emulator.** On 2026-10-30 a
+  `glance_s24u` AVD left up for 21 h (`adb devices` → `emulator-5554`) blocked the swap clear with
+  3.7 GB of swap used and 19 GB free. Ask before stopping it (`adb -s emulator-5554 emu kill`);
+  the next run cleared swap itself and passed.
 - **It is a host flake, not the app — but not one load predicts.** That day six runs of the same
   code: four failed this way (one at a 1-minute load of 0.5), two passed (at 2.5 and 1.8), both with
   a reused APK on a host that had cooled after its own Gradle build. Don't change the app over it;
