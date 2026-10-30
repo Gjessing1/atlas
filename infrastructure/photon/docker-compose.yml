@@ -37,7 +37,7 @@ services:
     ports:
       - '127.0.0.1:2322:2322'
     volumes:
-      - /home/gjessing/docker/Productivity/atlas/photon-data:/photon/data
+      - /home/gjessing/docker/productivity/atlas/photon-data:/photon/data
     networks:
       - atlas
 

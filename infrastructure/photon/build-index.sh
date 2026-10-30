@@ -21,7 +21,7 @@
 set -euo pipefail
 
 AREA="${1:-${PHOTON_AREA:-europe}}"
-LIVE="${PHOTON_DATA_DIR:-/home/gjessing/docker/Productivity/atlas/photon-data}"
+LIVE="${PHOTON_DATA_DIR:-/home/gjessing/docker/productivity/atlas/photon-data}"
 STAGE="$LIVE-staging"
 IMAGE="${PHOTON_IMAGE:-photon-photon:latest}"
 BASE=https://download1.graphhopper.com/public

@@ -1,5 +1,5 @@
 # PostgreSQL + PostGIS — the sync source of truth (accounts + user-data sync).
-# Template only: production runs from /home/gjessing/docker/Productivity/atlas/atlas-postgres,
+# Template only: production runs from /home/gjessing/docker/productivity/atlas/atlas-postgres,
 # its own compose project beside the deploy compose. It is kept out of that
 # compose so CI's `pull` + `up -d --remove-orphans` on every push never manages
 # the one stateful service, and out of this git tree so its secret cannot be lost
@@ -8,7 +8,7 @@
 #
 # Fresh host:
 #   docker network create atlas        # once; shared with the backend container
-#   mkdir /home/gjessing/docker/Productivity/atlas/atlas-postgres && cd "$_"
+#   mkdir /home/gjessing/docker/productivity/atlas/atlas-postgres && cd "$_"
 #   cp <repo>/infrastructure/postgres/docker-compose.yml .
 #   ln -s ../.env .env                 # POSTGRES_PASSWORD lives in the deploy .env
 #   docker compose up -d
