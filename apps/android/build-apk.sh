@@ -10,6 +10,9 @@
 #     ATLAS_KEYSTORE_PASSWORD, ATLAS_KEY_ALIAS, ATLAS_KEY_PASSWORD). Without it
 #     the APK is debug-signed and self-update against published builds breaks.
 #     Override the location with ATLAS_KEYSTORE_ENV.
+#   - ATLAS_UNSIGNED_RELEASE=1 produces an unsigned APK for a remote build that
+#     the trusted host must align and sign before use. ATLAS_ANDROID_ABIS and
+#     ATLAS_GRADLE_MAX_WORKERS can limit a regression candidate's build load.
 #
 # The android/ directory is generated (expo prebuild, gitignored); this script
 # regenerates/refreshes it every run so app.json + config plugins stay the
@@ -24,7 +27,9 @@ fi
 : "${ANDROID_HOME:?ANDROID_HOME not set and no \$HOME/android-sdk/env.sh found}"
 
 KEYSTORE_ENV="${ATLAS_KEYSTORE_ENV:-$HOME/.config/atlas/keystore.env}"
-if [ -f "$KEYSTORE_ENV" ]; then
+if [ "${ATLAS_UNSIGNED_RELEASE:-}" = "1" ]; then
+  echo 'Building an unsigned release candidate for signing on SOYO'
+elif [ -f "$KEYSTORE_ENV" ]; then
   set -a
   # shellcheck disable=SC1090
   source "$KEYSTORE_ENV"
@@ -49,18 +54,33 @@ fi
 # node_modules changes this is fast and idempotent
 npx expo prebuild --platform android --no-install
 
-# keep gradle caches inside the workspace (gitignored as .gradle-home)
-export GRADLE_USER_HOME="$PWD/.gradle-home"
-(cd android && ./gradlew --no-daemon assembleRelease)
+# The worker can keep a persistent Gradle cache outside its disposable source tree.
+export GRADLE_USER_HOME="${ATLAS_GRADLE_USER_HOME:-$PWD/.gradle-home}"
+mkdir -p "$GRADLE_USER_HOME"
+gradle_args=(--no-daemon)
+if [ -n "${ATLAS_GRADLE_MAX_WORKERS:-}" ]; then
+  gradle_args+=(--max-workers "$ATLAS_GRADLE_MAX_WORKERS")
+fi
+if [ -n "${ATLAS_ANDROID_ABIS:-}" ]; then
+  gradle_args+=("-PreactNativeArchitectures=$ATLAS_ANDROID_ABIS")
+fi
+(cd android && ./gradlew "${gradle_args[@]}" assembleRelease)
 
-APK="$PWD/android/app/build/outputs/apk/release/app-release.apk"
+if [ "${ATLAS_UNSIGNED_RELEASE:-}" = "1" ]; then
+  APK="$PWD/android/app/build/outputs/apk/release/app-release-unsigned.apk"
+else
+  APK="$PWD/android/app/build/outputs/apk/release/app-release.apk"
+fi
+test -s "$APK"
 echo
 echo "APK: $APK"
 
 # Verify the signature with apksigner (keytool -printcert only reads the legacy
 # v1/JAR signature and prints "Not a signed jar file" for v2/v3-only APKs).
 APKSIGNER="$(ls "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1)"
-if [ -n "$APKSIGNER" ]; then
+if [ "${ATLAS_UNSIGNED_RELEASE:-}" = "1" ]; then
+  echo '(unsigned release candidate; sign it on the trusted host before testing or publishing)'
+elif [ -n "$APKSIGNER" ]; then
   "$APKSIGNER" verify --print-certs "$APK" | grep -E "Signer #1 certificate (DN|SHA-256)" || true
 else
   echo "(apksigner not found under \$ANDROID_HOME/build-tools; skipping signature check)"

@@ -12,6 +12,11 @@ infrastructure/packs/publish-native.sh apps/android/android/app/build/outputs/ap
 # Reuse an APK already built from this exact source (saves ~10 min per retry):
 ATLAS_ANDROID_REGRESSION_APK=$PWD/apps/android/android/app/build/outputs/apk/release/app-release.apk \
   infrastructure/packs/publish-update.sh
+# Optionally offload the CPU-heavy candidate build to Ally-X; it is signed here:
+scripts/build-apk-ally-x.sh
+ATLAS_ANDROID_BACKEND=ally-x \
+  ATLAS_ANDROID_REGRESSION_APK=$PWD/apps/android/android/app/build/outputs/apk/release/app-release.apk \
+  infrastructure/packs/publish-update.sh
 ```
 
 Budget ~7 min for a regression on the Ally-X worker (~20 min on this host's AVD), plus ~10 min

@@ -100,6 +100,14 @@ The script verifies the result with `apksigner verify --print-certs` (the old `k
 -printcert` reads only the legacy v1/JAR signature and prints "Not a signed jar file" for
 APKs signed with the v2/v3 scheme only).
 
+To offload the CPU-heavy build of an OTA regression candidate, run
+`scripts/build-apk-ally-x.sh` from the repo root. It builds an unsigned x86_64 release APK in
+Ally-X's WSL2 environment, then aligns and release-signs it on SOYO. The signing keystore stays
+on SOYO. Pass the resulting `apps/android/android/app/build/outputs/apk/release/app-release.apk`
+as `ATLAS_ANDROID_REGRESSION_APK` to `publish-update.sh`; set
+`ATLAS_ANDROID_BACKEND=ally-x` to require the worker for the regression. This x86_64 candidate
+is for the worker's emulator, not for publishing as a full device APK.
+
 ## Self-update / publishing a build
 
 Bump `android.versionCode` in `app.json`, build, then publish so the in-app updater offers it:

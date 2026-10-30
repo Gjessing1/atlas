@@ -3,7 +3,10 @@
 #
 # Notes specific to this runner (host-Docker-socket model, same as maily/nodemap):
 # - `runs-on: docker` -> catthehacker/ubuntu:act-latest, which has the docker CLI.
-# - docker build/push run against the HOST daemon via the mounted socket.
+# - Builds prefer Ally-X when its shared health gate and lock admit the job. The
+#   image is loaded into SOYO's daemon for smoke, registry push and deploy.
+#   Unavailable before start -> local build; a started build failure -> red CI.
+# - The local path and push run against the HOST daemon via the mounted socket.
 # - Pushes go to localhost:3000 (Forgejo's host-published HTTP port) rather than
 #   git.gjessing.io, because Caddy 413s large layer uploads. Registry storage is
 #   hostname-agnostic, so the image is still *pulled* as git.gjessing.io/... as usual.
@@ -42,6 +45,9 @@ jobs:
       packages: write # not sufficient alone on this instance; push uses REGISTRY_TOKEN (see auth step)
     env:
       DOCKER_BUILDKIT: '1' # required for the Dockerfile's RUN --mount=type=cache npm cache
+      ALLY_X_JOB_HOST: larsg@192.168.86.21 # DHCP reservation; CI containers do not use mDNS
+      ALLY_X_JOB_KEY: /run/secrets/ally-x-ci-key
+      ALLY_X_JOB_KNOWN_HOSTS: /run/secrets/ally-x-ci-known-hosts
       # Deploy project (compose file + .env), bind-mounted into the job by the runner.
       DEPLOY_DIR: /home/gjessing/docker/productivity/atlas
     steps:
@@ -59,21 +65,14 @@ jobs:
             "$auth" "$auth" > ~/.docker/config.json
 
       - name: Build image
-        # Tagged with both the public pull name and the localhost push name so the
-        # layers are shared (one build, two tag sets).
-        run: |
-          SHA_TAG="${GITHUB_SHA::7}"
-          docker build --progress=plain -f backend/Dockerfile \
-            --build-arg GIT_SHA="$GITHUB_SHA" \
-            -t "$IMAGE:latest" -t "$IMAGE:$SHA_TAG" \
-            -t "$PUSH_IMAGE:latest" -t "$PUSH_IMAGE:$SHA_TAG" .
+        run: bash scripts/ci-build.sh "$GITHUB_SHA"
 
       # A green quality gate proves the code compiles; it does NOT prove the image
       # RUNS. A runtime dep that isn't shipped (e.g. an @atlas/* dist missing from the
       # image) only surfaces as an import-time crash loop — which is what shipped in
       # v0.75.0. Boot the freshly built image with no sync env (anonymous local-only)
       # and require /api/health before anything is pushed. Poll via `docker exec` (the
-      # container runs on the HOST daemon; a host-published port is not reachable from
+      # container runs on SOYO's daemon; a host-published port is not reachable from
       # this job container, same as the registry-auth note above), so a crash-exit is
       # caught as an exec failure. Nothing is pushed unless the server actually answers.
       - name: Smoke test — the image must actually boot
