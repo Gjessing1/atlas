@@ -56,7 +56,7 @@ test('connects Garmin, imports a GPS activity and sends a planned course', async
   await library.getByRole('combobox', { name: 'Library sport' }).selectOption('Running');
   await library.getByRole('combobox', { name: 'Activity year' }).selectOption('2026');
   await expect(library.getByRole('button', { name: 'Morning run', exact: true })).toBeVisible();
-  await library.getByRole('button', { name: 'Show only these' }).click();
+  await library.getByRole('button', { name: 'Show filtered on map' }).click();
   const trackLine = () =>
     page.evaluate(
       () =>
@@ -133,6 +133,7 @@ test('connects Garmin, imports a GPS activity and sends a planned course', async
 
   await page.getByRole('button', { name: 'Collections' }).click();
   await library.getByRole('tab', { name: 'Places' }).click();
+  await library.getByRole('button', { name: 'All places', exact: true }).click();
   await library.locator('input[accept=".gpx,.kml,.kmz"]').setInputFiles({
     name: 'explore.gpx',
     mimeType: 'application/gpx+xml',
@@ -205,7 +206,7 @@ test('manages Garmin courses: filter, save to Atlas, rename, sport, send and del
   await page.getByRole('button', { name: 'Close panel' }).click();
   await page.getByRole('button', { name: 'Collections' }).click();
   const library = page.getByRole('complementary', { name: 'Collections' });
-  await library.getByRole('tab', { name: 'Routes & courses' }).click();
+  await library.getByRole('tab', { name: 'Routes' }).click();
   const courses = page.locator('.garmin-courses');
   await expect(courses.getByRole('heading', { name: 'Courses · 2' })).toBeVisible();
   await expect(courses).toContainText('Trail running · 18.0 km · ↗ 536 m');
@@ -221,7 +222,7 @@ test('manages Garmin courses: filter, save to Atlas, rename, sport, send and del
   await expect(library).toContainText('Running');
   await expect(library.getByText('18k Jørgen')).toBeVisible();
 
-  await library.getByRole('tab', { name: 'Routes & courses' }).click();
+  await library.getByRole('tab', { name: 'Routes' }).click();
   const row = courses.getByRole('button', { name: /18k Jørgen/ });
   await expect(row).toContainText('In Atlas');
   await row.click();
@@ -317,7 +318,7 @@ test('edits a Garmin course in the planner and replaces it on Garmin', async ({ 
 
   await page.getByRole('button', { name: 'Collections' }).click();
   const library = page.getByRole('complementary', { name: 'Collections' });
-  await library.getByRole('tab', { name: 'Routes & courses' }).click();
+  await library.getByRole('tab', { name: 'Routes' }).click();
   const courses = page.locator('.garmin-courses');
   await courses.getByRole('button', { name: /Lake loop/ }).click();
   await courses.getByRole('combobox', { name: 'Garmin device' }).selectOption('456');

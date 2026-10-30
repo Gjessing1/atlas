@@ -1,3 +1,4 @@
+import type { SavedRouteMetadata } from '@atlas/app-hooks';
 import {
   altChipLabel,
   fmtDistanceM,
@@ -275,7 +276,12 @@ export function RoutePanel({
   onOpenVehicleSettings: () => void;
   /** Start the timetable-driven passenger companion for one selected journey. */
   onStartTransitGuidance: (trip: TransitTrip) => void;
-  onSaveTrack: (data: TrackData, name: string, collectionId: string | null) => Promise<boolean>;
+  onSaveTrack: (
+    data: TrackData,
+    name: string,
+    collectionId: string | null,
+    metadata: SavedRouteMetadata,
+  ) => Promise<boolean>;
   garmin: GarminState;
   onOpenGarminSettings: () => void;
 }) {
@@ -408,6 +414,7 @@ export function RoutePanel({
       routePathToTrackData(path, saveName.trim()),
       saveName.trim(),
       saveCollection || null,
+      { profile: route.profile, durationMs: path.timeMs },
     );
     setSaving(false);
     setSaved(ok);

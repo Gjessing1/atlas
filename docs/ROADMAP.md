@@ -48,12 +48,13 @@ dissolved into Routes & courses, Activities and Places. What remains:
       live in Collections' folder tree today; finding "that ridge run from last summer" means
       knowing which folder it fell into. Design the library around how it is looked for:
 
-      - **Views over the same records:** Folders, Places, Routes & courses and Activities exist on
-        both clients. Garmin has no tab of its own (v0.254.0): its remote courses list under Routes
+      - **Views over the same records:** Places (Folders / All places with pinned Quick access),
+        Routes and Activities exist on both clients. Garmin has no tab of its own (v0.254.0): its remote courses list under Routes
         & courses, the import status/check sits atop Activities, Explore GPX locations under
-        Places. Sport/year filters, a per-view Show all / Hide all and Show only these exist; iNatur
-        permit areas (old saves included) are kept out of Routes & courses. Still needed:
-        plan-profile sport for Atlas routes, and sort by distance or proximity to the map view.
+        Places. Sport/year filters, a per-view Show all / Hide all and Show filtered on map exist; iNatur
+        permit areas (old saves included) are kept out of Routes & courses. New Atlas routes retain travel mode and estimated duration; places sort by name, recent
+        additions or folder, tracks by newest/oldest, name or distance. Still needed: proximity
+        to the map view.
       - **Rows that answer the question:** name, sport, distance · ascent · date, and a tiny
         line or pin thumbnail; places show category and distance from you.
       - **Map-synced list:** scrolling or filtering highlights the matching lines/pins on the

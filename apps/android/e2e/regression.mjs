@@ -605,11 +605,10 @@ async function openMenuItem(id) {
 // that wants the top level goes there explicitly.
 async function openCollectionsAtRoot() {
   await openMenuItem('open-favorites');
-  const xml = await waitForId('favorites-sheet');
-  if (visibleNode(xml, 'collections-crumb-root')) {
-    tapId(xml, 'collections-crumb-root');
-    await waitForId('collections-crumb-root', false);
-  }
+  await waitForId('favorites-sheet');
+  await tap('favorites-sheet-handle');
+  await tap('collections-view-folders');
+  await tap('collections-places-folders');
 }
 
 async function closeSettings() {
@@ -712,10 +711,13 @@ async function createFolderAndReadPlace() {
   // verifyPersistence reads it back after a process restart. It sits in the
   // open folder's header, so open the folder and come back.
   await tap(`folder-open-${folderId}`);
+  await tap(`folder-more-${folderId}`);
   await tap(`folder-labels-${folderId}`);
+  await tap(`folder-more-${folderId}`);
   await waitFor('folder pin labels switched on', hierarchy, (value) =>
     isChecked(nodeForId(value, `folder-labels-${folderId}`)),
   );
+  shell('input', 'keyevent', 'KEYCODE_BACK');
   await tap('collections-back');
   await waitForId(`folder-row-${folderId}`);
   return {
@@ -726,6 +728,56 @@ async function createFolderAndReadPlace() {
       'saved place row',
     ).slice('favorite-'.length),
   };
+}
+
+async function verifyCollectionBrowsing({ placeId, folderId }) {
+  let xml = hierarchy();
+  if (nodeForId(xml, `drag-${placeId}`) || nodeForId(xml, `drag-${folderId}`))
+    throw new Error('Drag handles must start hidden');
+  await tap(`favorite-more-${placeId}`);
+  await tap(`favorite-quick-${placeId}`);
+  await waitForId(`quick-place-${placeId}`);
+  await tap('collections-more');
+  await tap('collections-reorder');
+  await waitForId(`drag-${folderId}`);
+  await tap('collections-reorder-done');
+  await waitForId(`drag-${folderId}`, false);
+  await tap('collections-view-places');
+  await tap('places-sort');
+  await tap('places-sort-option-recent');
+  await waitForId(`favorite-${placeId}`);
+  await tap('collections-places-folders');
+  // Hold the place's name, then move it into the folder without exposing a grip.
+  xml = await waitForId(`favorite-${placeId}`);
+  const from = visibleNode(xml, `favorite-${placeId}`).bounds;
+  const to = visibleNode(xml, `folder-row-${folderId}`).bounds;
+  const x = Math.round((from.left + from.right) / 2);
+  const y = Math.round((from.top + from.bottom) / 2);
+  const targetY = Math.round((to.top + to.bottom) / 2);
+  shell('input', 'motionevent', 'DOWN', String(x), String(y));
+  await delay(600);
+  for (let step = 1; step <= 8; step++) {
+    shell(
+      'input',
+      'motionevent',
+      'MOVE',
+      String(x),
+      String(Math.round(y + ((targetY - y) * step) / 8)),
+    );
+    await delay(35);
+  }
+  shell('input', 'motionevent', 'UP', String(x), String(targetY));
+  await tap(`folder-open-${folderId}`);
+  await waitForId(`favorite-${placeId}`);
+  keepScreenshot('collections-held-place.png');
+  // Restore its folder through the normal editor so later scenarios keep their fixture.
+  await tap(`favorite-more-${placeId}`);
+  await tap(`favorite-edit-${placeId}`);
+  await tapAfterScroll(`favorite-folder-${placeId}-none`, 'collections-scroll');
+  await tapAfterScroll(`favorite-save-${placeId}`, 'collections-scroll');
+  await tap('collections-back');
+  await waitForId(`favorite-${placeId}`);
+  keepScreenshot('collections-places.png');
 }
 
 function isChecked(node) {
@@ -941,20 +993,25 @@ async function verifyPersistence({ folderId, placeId, trackId }) {
   // A restart starts Collections at the top level: the place and the folder
   // are there, the track and the folder's label switch are inside it.
   await openMenuItem('open-favorites');
+  await tap('favorites-sheet-handle');
   let xml = await waitForId(`folder-row-${folderId}`);
+  expectIds(xml, [`quick-place-${placeId}`]);
   if (!nodeForId(xml, `favorite-${placeId}`)) {
     throw new Error(`Saved place ${placeId} did not survive process restart`);
   }
   tapId(xml, `folder-open-${folderId}`);
   xml = await waitForId(`track-${trackId}`);
-  expectIds(xml, [`track-${trackId}`, `folder-labels-${folderId}`, 'collections-back']);
+  expectIds(xml, [`track-${trackId}`, 'collections-back']);
   // The open folder's header and action chips are a layout, not text.
   keepScreenshot('collections-folder.png');
+  await tap(`folder-more-${folderId}`);
+  xml = await waitForId(`folder-labels-${folderId}`);
   if (!isChecked(nodeForId(xml, `folder-labels-${folderId}`))) {
     throw new Error(
       `Folder pin labels did not persist: ${nodeForId(xml, `folder-labels-${folderId}`)}`,
     );
   }
+  shell('input', 'keyevent', 'KEYCODE_BACK');
   await tap('favorites-close');
 }
 
@@ -972,7 +1029,7 @@ async function verifySavedCollectionSearch({ folderId, trackId }) {
     await waitFor('search reveal to leave Collections unfiltered', hierarchy, (xml) => {
       const field = nodeForId(xml, 'collections-filter');
       // UiAutomator reports a blank TextInput's placeholder as its text.
-      return Boolean(field && /text="(?:|Filter by name, #tag or notes)"/.test(field));
+      return Boolean(field && /text="(?:|Search folders and places)"/.test(field));
     });
     await tap('favorites-close');
   }
@@ -1092,6 +1149,8 @@ async function main() {
   console.log('Android regression: creating saved place and folder');
   await searchAndSavePlace();
   const ids = await createFolderAndReadPlace();
+  console.log('Android regression: Places, Quick access, sorting and hold-to-reorder');
+  await verifyCollectionBrowsing(ids);
   await tap('favorites-close');
   console.log('Android regression: road planning, sheet snaps, and navigation hand-off');
   await planRoadRoute(ids.folderId, ids.placeId);

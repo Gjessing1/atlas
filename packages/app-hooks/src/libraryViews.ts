@@ -7,7 +7,8 @@ import {
   trackSummary,
   userTags,
 } from '@atlas/core';
-import type { TrackRecord } from '@atlas/storage';
+import { isRoutingProfile, type RoutingProfile } from '@atlas/routing';
+import type { CollectionRecord, PlaceRecord, TrackRecord } from '@atlas/storage';
 
 export type LibraryView = 'folders' | 'places' | 'courses' | 'activities';
 
@@ -49,7 +50,12 @@ export function libraryTrackKind(track: TrackRecord): 'course' | 'activity' | 't
  * the Routes sport filter.
  */
 export function libraryTrackSport(track: TrackRecord): string | null {
-  if (libraryTrackKind(track) === 'track') return null;
+  if (libraryTrackKind(track) === 'track') {
+    const profile = track.tags
+      .find((tag) => tag.startsWith('atlas-profile:'))
+      ?.slice('atlas-profile:'.length);
+    return profile && isRoutingProfile(profile) ? ROUTE_SPORTS[profile] : null;
+  }
   const type = track.tags.find(
     (tag) => tag && !tag.startsWith(GARMIN_ACTIVITY_TAG) && !tag.startsWith(GARMIN_COURSE_TAG),
   );
@@ -61,6 +67,7 @@ export function libraryTracks(
   view: 'courses' | 'activities',
   sport: string | null,
   year: number | null,
+  sort: LibraryTrackSort = 'newest',
 ): TrackRecord[] {
   return tracks
     .filter((track) => {
@@ -72,11 +79,19 @@ export function libraryTracks(
       return true;
     })
     .sort((a, b) => {
+      if (sort === 'name') return a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
+      if (sort === 'distance')
+        return (
+          (b.stats['distanceM'] ?? 0) - (a.stats['distanceM'] ?? 0) || a.name.localeCompare(b.name)
+        );
       if (view === 'activities') {
         const date = (activityDate(b) ?? '').localeCompare(activityDate(a) ?? '');
-        if (date) return date;
+        if (date) return sort === 'oldest' ? -date : date;
       }
-      return b.createdAt - a.createdAt;
+      return (
+        (sort === 'oldest' ? a.createdAt - b.createdAt : b.createdAt - a.createdAt) ||
+        a.name.localeCompare(b.name)
+      );
     });
 }
 
@@ -126,7 +141,10 @@ export function activityYearCounts(
  */
 export function libraryTrackLine(track: TrackRecord, nowMs = Date.now()): string {
   const kind = libraryTrackKind(track);
-  if (kind === 'track') return trackListLine(track.stats, nowMs);
+  if (kind === 'track')
+    return [libraryTrackSport(track), trackListLine(track.stats, nowMs)]
+      .filter(Boolean)
+      .join(' · ');
   const sport = libraryTrackSport(track);
   const recorded = activityDate(track);
   const parts: string[] = [];
@@ -146,10 +164,112 @@ export function libraryTrackLine(track: TrackRecord, nowMs = Date.now()): string
  * type (`trail_running`), which the row already says as its sport.
  */
 export function libraryTrackTags(track: TrackRecord): string[] {
-  const tags = userTags(track.tags);
+  const tags = userTags(track.tags).filter((tag) => !tag.startsWith('atlas-profile:'));
   if (libraryTrackKind(track) === 'track') return tags;
   const type = track.tags.find(
     (tag) => tag && !tag.startsWith(GARMIN_ACTIVITY_TAG) && !tag.startsWith(GARMIN_COURSE_TAG),
   );
   return tags.filter((tag) => tag !== type);
+}
+
+export type LibraryTrackSort = 'newest' | 'oldest' | 'name' | 'distance';
+export type LibraryPlaceSort = 'manual' | 'name' | 'recent' | 'folder';
+
+/** A normal exported/synced tag keeps shortcuts usable offline without a second place copy. */
+export const QUICK_ACCESS_TAG = 'quick-access';
+export const isQuickAccess = (place: Pick<PlaceRecord, 'tags'>): boolean =>
+  place.tags.includes(QUICK_ACCESS_TAG);
+export const quickAccessTags = (place: Pick<PlaceRecord, 'tags'>): string[] =>
+  isQuickAccess(place)
+    ? place.tags.filter((tag) => tag !== QUICK_ACCESS_TAG)
+    : [...place.tags, QUICK_ACCESS_TAG];
+
+export function libraryPlaces(
+  places: readonly PlaceRecord[],
+  folders: readonly CollectionRecord[],
+  sort: LibraryPlaceSort,
+): PlaceRecord[] {
+  const names = new Map(folders.map((folder) => [folder.id, folder.name]));
+  return [...places].sort((a, b) => {
+    if (sort === 'recent') return b.createdAt - a.createdAt || a.name.localeCompare(b.name);
+    if (sort === 'folder') {
+      const folder = (names.get(a.collectionId ?? '') ?? '').localeCompare(
+        names.get(b.collectionId ?? '') ?? '',
+      );
+      if (folder) return folder;
+    }
+    if (sort === 'manual') return a.sortIndex - b.sortIndex || a.name.localeCompare(b.name);
+    return a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
+  });
+}
+
+/** Human context belongs in lists; coordinates remain in the place details. */
+export function libraryPlaceLine(place: PlaceRecord, folders: readonly CollectionRecord[]): string {
+  const folder = folders.find((item) => item.id === place.collectionId)?.name;
+  return (
+    [folder, place.address || place.notes.split('\n')[0]].filter(Boolean).join(' · ') ||
+    'Saved place'
+  );
+}
+
+/** Folder suppression is a map state, never a disabled or faded library item. */
+export function libraryVisibility(
+  item: { visible: boolean; collectionId: string | null },
+  folders: readonly CollectionRecord[],
+): string {
+  if (!item.visible) return 'Hidden from map';
+  const byId = new Map(folders.map((folder) => [folder.id, folder]));
+  const seen = new Set<string>();
+  let id = item.collectionId;
+  while (id !== null && !seen.has(id)) {
+    seen.add(id);
+    const folder = byId.get(id);
+    if (!folder) break;
+    if (!folder.visible) return `Hidden by ${folder.name}`;
+    id = folder.parentId;
+  }
+  return 'On map';
+}
+
+export interface SavedRouteMetadata {
+  profile: RoutingProfile;
+  durationMs: number;
+}
+const ROUTE_SPORTS: Record<RoutingProfile, string> = {
+  car: 'Driving',
+  bike: 'Cycling',
+  foot: 'Walking',
+  hike: 'Hiking',
+  run: 'Running',
+};
+export function plannedRouteMetadata(metadata?: SavedRouteMetadata): {
+  tags: string[];
+  stats: Record<string, number>;
+} {
+  if (!metadata) return { tags: [], stats: {} };
+  return {
+    tags: [`atlas-profile:${metadata.profile}`],
+    stats:
+      Number.isFinite(metadata.durationMs) && metadata.durationMs > 0
+        ? { durationMs: metadata.durationMs }
+        : {},
+  };
+}
+
+/** Old unnamed pins used their coordinates as a generated name; keep that in details only. */
+export function libraryPlaceName(place: Pick<PlaceRecord, 'name' | 'address' | 'notes'>): string {
+  return /^[+-]?\d+(?:\.\d+)?\s*,\s*[+-]?\d+(?:\.\d+)?$/.test(place.name.trim())
+    ? place.address || place.notes.split('\n')[0] || 'Saved place'
+    : place.name;
+}
+
+/** Bookkeeping is kept in exports/sync, outside user-facing tag fields and suggestions. */
+export function libraryEditableTags(tags: readonly string[]): string[] {
+  return userTags([...tags]).filter(
+    (tag) => tag !== QUICK_ACCESS_TAG && !tag.startsWith('atlas-profile:'),
+  );
+}
+export function mergeLibraryTags(original: readonly string[], edited: readonly string[]): string[] {
+  const editable = new Set(libraryEditableTags(original));
+  return [...original.filter((tag) => !editable.has(tag)), ...libraryEditableTags(edited)];
 }

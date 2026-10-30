@@ -1,4 +1,12 @@
 import {
+  libraryPlaces,
+  libraryPlaceLine,
+  libraryPlaceName,
+  libraryVisibility,
+  isQuickAccess,
+  quickAccessTags,
+  type LibraryPlaceSort,
+  type LibraryTrackSort,
   ancestorFolderIds,
   collectionDropZone,
   collectionTagSuggestions,
@@ -568,6 +576,9 @@ export function FavoritesSheet({
   // at the list, not a property of it.
   const [filter, setFilter] = useState('');
   const [view, setView] = useState<CollectionsView>('folders');
+  const [placeSort, setPlaceSort] = useState<LibraryPlaceSort>('name');
+  const [trackSort, setTrackSort] = useState<LibraryTrackSort>('newest');
+  const [reordering, setReordering] = useState(false);
   const [sport, setSport] = useState<string | null>(null);
   const [year, setYear] = useState<number | null>(null);
   // The folder being looked at; null is the top level. One level at a time:
@@ -613,6 +624,7 @@ export function FavoritesSheet({
   /** Go to a folder (null = top level), starting its list from the top. */
   const openFolder = (id: string | null) => {
     setFolderId(id);
+    setReordering(false);
     setEditingKey(null);
     setRenaming(false);
     setTrackLimit(TRACK_PAGE);
@@ -624,6 +636,7 @@ export function FavoritesSheet({
   /** Switch tabs, starting the new one unfiltered and from the top. */
   const showView = (next: CollectionsView) => {
     setView(next);
+    setReordering(false);
     setSport(null);
     setYear(null);
     setTrackLimit(TRACK_PAGE);
@@ -655,8 +668,12 @@ export function FavoritesSheet({
   // What the list is narrowed to — name, tag, notes or address, with a
   // leading `#` meaning tags alone, which is what a tapped tag chip writes.
   const filtered = useMemo(
-    () => filterCollectionRecords({ collections, places, tracks }, filter),
-    [collections, places, tracks, filter],
+    () =>
+      filterCollectionRecords(
+        { collections, places, tracks: view === 'places' ? [] : tracks },
+        filter,
+      ),
+    [collections, places, tracks, filter, view],
   );
   const viewSource = useMemo(
     () => libraryTracks(tracks, view === 'activities' ? 'activities' : 'courses', null, null),
@@ -664,8 +681,14 @@ export function FavoritesSheet({
   );
   const viewTracks = useMemo(
     () =>
-      libraryTracks(filtered.tracks, view === 'activities' ? 'activities' : 'courses', sport, year),
-    [filtered.tracks, view, sport, year],
+      libraryTracks(
+        filtered.tracks,
+        view === 'activities' ? 'activities' : 'courses',
+        sport,
+        year,
+        trackSort,
+      ),
+    [filtered.tracks, view, sport, year, trackSort],
   );
   const sports = useMemo(() => librarySportCounts(viewSource), [viewSource]);
   // A listed track the map does not draw, by its own eye or a hidden folder above it.
@@ -679,10 +702,6 @@ export function FavoritesSheet({
   const activities = useMemo(() => libraryTracks(tracks, 'activities', null, null), [tracks]);
   const garminLocations = useMemo(
     () => collections.find((item) => item.name === GARMIN_LOCATIONS && item.parentId === null),
-    [collections],
-  );
-  const folderNames = useMemo(
-    () => new Map(collections.map((item) => [item.id, item.name])),
     [collections],
   );
   // Folder tree — derived by the shared model, so web and Android agree on
@@ -801,17 +820,13 @@ export function FavoritesSheet({
 
   const toggleEditing = (key: string) => setEditingKey((cur) => (cur === key ? null : key));
 
-  const placeRow = (place: PlaceRecord, handle: ReactNode, folderName?: string): ReactNode => {
+  const placeRow = (place: PlaceRecord, handle: ReactNode): ReactNode => {
     const key = `place:${place.id}`;
     return (
       <View>
         <View
           ref={highlighted === key ? revealRowRef : undefined}
-          style={[
-            styles.row,
-            place.visible ? null : styles.rowHidden,
-            highlighted === key ? styles.rowRevealed : null,
-          ]}
+          style={[styles.row, highlighted === key ? styles.rowRevealed : null]}
         >
           {handle}
           <Pressable
@@ -827,31 +842,47 @@ export function FavoritesSheet({
               onFlyTo(place);
               onClose();
             }}
+            onLongPress={() => {}}
             testID={`favorite-${place.id}`}
           >
-            <Text style={styles.rowText} numberOfLines={1}>
-              {place.name}
+            <Text style={styles.rowText} numberOfLines={2}>
+              {libraryPlaceName(place)}
             </Text>
             <Text style={styles.muted} numberOfLines={1}>
-              {folderName ? `${folderName} · ` : ''}
-              {place.address || `${place.lat.toFixed(4)}, ${place.lng.toFixed(4)}`}
+              {libraryPlaceLine(place, collections)}
             </Text>
-            <TagChips tags={place.tags} onPick={setFilter} />
+            <Text style={styles.mapState}>{libraryVisibility(place, collections)}</Text>
+            <TagChips
+              tags={place.tags.filter((tag) => tag !== 'quick-access')}
+              onPick={setFilter}
+            />
           </Pressable>
           <Pressable
             style={styles.eyeButton}
             onPress={() => onPatch(place.id, { visible: !place.visible })}
+            accessibilityRole="button"
+            accessibilityLabel={`${place.visible ? 'Hide' : 'Show'} ${place.name} on map. ${libraryVisibility(place, collections)}`}
+            accessibilityState={{ selected: place.visible }}
             testID={`favorite-visible-${place.id}`}
           >
-            <EyeIcon off={!place.visible} />
+            <EyeIcon off={libraryVisibility(place, collections) !== 'On map'} />
           </Pressable>
-          <Pressable
-            style={[styles.button, styles.buttonQuiet]}
-            onPress={() => toggleEditing(key)}
-            testID={`favorite-edit-${place.id}`}
-          >
-            <Text style={styles.buttonQuietText}>✎</Text>
-          </Pressable>
+          <ActionMenu
+            title={libraryPlaceName(place)}
+            testID={`favorite-more-${place.id}`}
+            actions={[
+              {
+                label: 'Edit place',
+                onPress: () => toggleEditing(key),
+                testID: `favorite-edit-${place.id}`,
+              },
+              {
+                label: isQuickAccess(place) ? 'Remove from Quick access' : 'Pin to Quick access',
+                onPress: () => onPatch(place.id, { tags: quickAccessTags(place) }),
+                testID: `favorite-quick-${place.id}`,
+              },
+            ]}
+          />
           <Pressable
             style={styles.button}
             onPress={() => {
@@ -898,11 +929,7 @@ export function FavoritesSheet({
       <View key={key}>
         <View
           ref={highlighted === key ? revealRowRef : undefined}
-          style={[
-            styles.row,
-            track.visible ? null : styles.rowHidden,
-            highlighted === key ? styles.rowRevealed : null,
-          ]}
+          style={[styles.row, highlighted === key ? styles.rowRevealed : null]}
         >
           <View style={styles.trackIconBox}>
             <Text style={styles.trackIcon}>{garminSportIcon(libraryTrackSport(track))}</Text>
@@ -915,20 +942,24 @@ export function FavoritesSheet({
             }}
             testID={`track-${track.id}`}
           >
-            <Text style={styles.rowText} numberOfLines={1}>
+            <Text style={styles.rowText} numberOfLines={2}>
               {track.name}
             </Text>
             <Text style={styles.muted} numberOfLines={1}>
               {libraryTrackLine(track)}
             </Text>
+            <Text style={styles.mapState}>{libraryVisibility(track, collections)}</Text>
             <TagChips tags={libraryTrackTags(track)} onPick={setFilter} />
           </Pressable>
           <Pressable
             style={styles.eyeButton}
             onPress={() => onPatchTrack(track.id, { visible: !track.visible })}
+            accessibilityRole="button"
+            accessibilityLabel={`${track.visible ? 'Hide' : 'Show'} ${track.name} on map. ${libraryVisibility(track, collections)}`}
+            accessibilityState={{ selected: track.visible }}
             testID={`track-visible-${track.id}`}
           >
-            <EyeIcon off={!track.visible} />
+            <EyeIcon off={libraryVisibility(track, collections) !== 'On map'} />
           </Pressable>
           <Pressable
             style={[styles.button, styles.buttonQuiet]}
@@ -1022,17 +1053,11 @@ export function FavoritesSheet({
     return (
       <View>
         {flat ? (
-          shown.map((place) => (
-            <View key={place.id}>
-              {placeRow(
-                place,
-                null,
-                place.collectionId ? folderNames.get(place.collectionId) : undefined,
-              )}
-            </View>
-          ))
+          shown.map((place) => <View key={place.id}>{placeRow(place, null)}</View>)
         ) : (
           <ReorderableList
+            holdToDrag={editingKey === null}
+            showHandles={reordering && !filtered.active}
             items={shown}
             keyOf={(place) => place.id}
             onMove={(place, target, zone) =>
@@ -1075,11 +1100,7 @@ export function FavoritesSheet({
           if (highlighted === `folder:${folder.id}`) revealRowRef.current = view;
         }}
         onLayout={() => measureFolder(folder.id)}
-        style={[
-          styles.row,
-          node?.visible === false ? styles.rowHidden : null,
-          highlighted === `folder:${folder.id}` ? styles.rowRevealed : null,
-        ]}
+        style={[styles.row, highlighted === `folder:${folder.id}` ? styles.rowRevealed : null]}
         testID={`folder-row-${folder.id}`}
       >
         {handle}
@@ -1087,10 +1108,12 @@ export function FavoritesSheet({
           style={styles.folderOpen}
           onPress={() => {
             setFilter('');
+            setView('folders');
             openFolder(folder.id);
           }}
           accessibilityRole="button"
           accessibilityLabel={`Open ${folder.name}`}
+          onLongPress={() => {}}
           testID={`folder-open-${folder.id}`}
         >
           <Text style={styles.folderIcon}>📁</Text>
@@ -1100,17 +1123,23 @@ export function FavoritesSheet({
             </Text>
             <Text style={styles.muted} numberOfLines={1}>
               {path.length > 0 ? `${path.join(' › ')} · ` : ''}
-              {node ? folderContentsLine(node) : ''}
+              {node ? folderContentsLine(node) : ''} ·{' '}
+              {libraryVisibility(
+                { visible: folder.visible, collectionId: folder.parentId },
+                collections,
+              )}
             </Text>
           </View>
         </Pressable>
         <Pressable
           style={styles.eyeButton}
           onPress={() => onSetFolderVisible(folder.id, !folder.visible)}
+          accessibilityRole="button"
+          accessibilityState={{ selected: folder.visible }}
           accessibilityLabel={`${folder.visible ? 'Hide' : 'Show'} ${folder.name} on the map`}
           testID={`folder-visible-${folder.id}`}
         >
-          <EyeIcon off={!folder.visible} />
+          <EyeIcon off={!node?.visible} />
         </Pressable>
         <Text style={styles.chevronText}>›</Text>
       </View>
@@ -1121,6 +1150,8 @@ export function FavoritesSheet({
     if (level.length === 0) return null;
     return (
       <ReorderableList
+        holdToDrag={editingKey === null}
+        showHandles={reordering && !filtered.active}
         items={level}
         keyOf={(folder) => folder.id}
         onMove={(folder, target, zone) =>
@@ -1157,21 +1188,10 @@ export function FavoritesSheet({
           >
             <Text style={styles.backText}>‹</Text>
           </Pressable>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.crumbs}>
-            <Pressable onPress={() => openFolder(null)} hitSlop={6} testID="collections-crumb-root">
-              <Text style={styles.crumb}>Collections</Text>
-            </Pressable>
-            {above.map((ancestor) => (
-              <Pressable
-                key={ancestor.id}
-                onPress={() => openFolder(ancestor.id)}
-                hitSlop={6}
-                testID={`collections-crumb-${ancestor.id}`}
-              >
-                <Text style={styles.crumb}> › {ancestor.name}</Text>
-              </Pressable>
-            ))}
-          </ScrollView>
+          <Text style={[styles.rowText, styles.rowMain]} numberOfLines={2}>
+            {folder.name}
+          </Text>
+          {folderActions(folder)}
         </View>
         {renaming ? (
           <TextInput
@@ -1189,8 +1209,12 @@ export function FavoritesSheet({
             testID={`folder-rename-${folder.id}`}
           />
         ) : (
-          <Text style={styles.folderTitle} numberOfLines={3} testID="collections-folder-title">
-            📂 {folder.name}
+          <Text style={styles.muted} testID="collections-folder-title">
+            {above.length ? above.map((item) => item.name).join(' › ') : 'Places'} ·{' '}
+            {libraryVisibility(
+              { visible: folder.visible, collectionId: folder.parentId },
+              collections,
+            )}
           </Text>
         )}
       </View>
@@ -1200,29 +1224,28 @@ export function FavoritesSheet({
   /** The open folder's own actions, named in full — the row has no room for them. */
   const folderActions = (folder: CollectionRecord): ReactNode => (
     <View style={styles.folderActions}>
-      <Pressable
-        style={[styles.chipButton, folder.visible ? null : styles.chipButtonOn]}
-        onPress={() => onSetFolderVisible(folder.id, !folder.visible)}
-        accessibilityRole="switch"
-        accessibilityState={{ checked: folder.visible }}
-        testID="collections-folder-visible"
-      >
-        <EyeIcon off={!folder.visible} />
-        <Text style={styles.chipButtonText}>{folder.visible ? 'On map' : 'Hidden'}</Text>
-      </Pressable>
-      <View style={styles.chipButton}>
-        <PinLabelToggle
-          on={folderHasPinLabels(pinLabels.prefs, folder.id)}
-          what={folder.name}
-          onToggle={() => void pinLabels.toggleFolder(folder.id)}
-          testID={`folder-labels-${folder.id}`}
-        />
-        <Text style={styles.chipButtonText}>Names</Text>
-      </View>
       <ActionMenu
         title={folder.name}
         testID={`folder-more-${folder.id}`}
         actions={[
+          {
+            label: `${folder.visible ? '✓ ' : ''}Show on map`,
+            onPress: () => onSetFolderVisible(folder.id, !folder.visible),
+            testID: 'collections-folder-visible',
+            selected: folder.visible,
+          },
+          {
+            label: `${folderHasPinLabels(pinLabels.prefs, folder.id) ? '✓ ' : ''}Show labels`,
+            onPress: () => void pinLabels.toggleFolder(folder.id),
+            testID: `folder-labels-${folder.id}`,
+            selected: folderHasPinLabels(pinLabels.prefs, folder.id),
+          },
+          { label: 'New subfolder', onPress: () => setAddingFolder(true), testID: 'folder-new' },
+          {
+            label: reordering ? 'Done reordering' : 'Reorder',
+            onPress: () => setReordering((value) => !value),
+            testID: 'collections-reorder',
+          },
           { label: 'Rename', onPress: () => setRenaming(true), testID: `folder-name-${folder.id}` },
           ...(folder.parentId !== null
             ? [
@@ -1264,7 +1287,6 @@ export function FavoritesSheet({
     const nothingSaved = places.length === 0 && tracks.length === 0 && collections.length === 0;
     return (
       <>
-        {current ? folderActions(current.folder) : null}
         {renderFolders(subfolders)}
         {addingFolder ? (
           <View style={styles.row}>
@@ -1287,16 +1309,16 @@ export function FavoritesSheet({
               <Text style={styles.buttonText}>Add</Text>
             </Pressable>
           </View>
-        ) : (
+        ) : !current ? (
           <Pressable
             style={styles.newFolderButton}
             onPress={() => setAddingFolder(true)}
-            accessibilityLabel={current ? `New folder in ${current.folder.name}` : 'New folder'}
+            accessibilityLabel="New folder"
             testID="folder-new"
           >
             <Text style={styles.link}>＋ New folder</Text>
           </Pressable>
-        )}
+        ) : null}
         {nothingSaved ? (
           <Text style={styles.muted}>
             Nothing saved yet. Long-press the map to save a pin, import a GPX/KML/KMZ file — or sign
@@ -1363,6 +1385,22 @@ export function FavoritesSheet({
     return (
       <View style={styles.libraryFilters}>
         <View style={styles.filterPills}>
+          <FilterMenu
+            label="Sort"
+            allLabel="Newest first"
+            value={trackSort === 'newest' ? null : trackSort}
+            options={[
+              { key: 'oldest', label: 'Oldest first' },
+              { key: 'name', label: 'Name' },
+              { key: 'distance', label: 'Longest first' },
+            ]}
+            onChange={(value) => {
+              setTrackSort(value ?? 'newest');
+              scrollRef.current?.scrollTo({ y: 0, animated: false });
+              setTrackLimit(TRACK_PAGE);
+            }}
+            testID="library-sort"
+          />
           {sports.length > 1 ? (
             <FilterMenu
               label="Sport"
@@ -1402,7 +1440,6 @@ export function FavoritesSheet({
           <Text style={styles.summaryText} numberOfLines={1}>
             {viewTracks.length}{' '}
             {viewTracks.length !== 1 ? noun : view === 'activities' ? 'activity' : 'route'}
-            {view === 'activities' ? ', newest first' : ''}
           </Text>
         </View>
         <View style={styles.summaryRow}>
@@ -1428,10 +1465,10 @@ export function FavoritesSheet({
             disabled={viewTracks.length === 0}
             onPress={() => onShowOnlyTracks(viewTracks.map((track) => track.id))}
             hitSlop={10}
-            accessibilityLabel={`Show only these ${noun} on the map`}
+            accessibilityLabel={`Show filtered on map ${noun} on the map`}
             testID="library-show-only-matches"
           >
-            <Text style={styles.link}>Show only these</Text>
+            <Text style={styles.link}>Show filtered on map</Text>
           </Pressable>
         </View>
       </View>
@@ -1464,6 +1501,18 @@ export function FavoritesSheet({
               ? 'No routes in Atlas yet. Save one from the route planner or import a GPX file; your Garmin courses are below.'
               : 'No routes yet. Save one from the route planner or import a GPX file.'}
         </Text>
+        <Pressable
+          style={styles.buttonQuiet}
+          onPress={() => setImportOpen(true)}
+          testID="library-empty-import"
+        >
+          <Text style={styles.link}>Import GPX / KML</Text>
+        </Pressable>
+        {view === 'courses' ? (
+          <Pressable style={styles.buttonQuiet} onPress={onClose}>
+            <Text style={styles.link}>Back to map to plan a route</Text>
+          </Pressable>
+        ) : null}
       </View>
     );
   };
@@ -1587,27 +1636,30 @@ export function FavoritesSheet({
       <View style={styles.headerRow}>
         <Text style={styles.heading}>Collections</Text>
         <View style={styles.headerActions}>
-          <Pressable
-            style={[styles.headerButton, importOpen ? styles.buttonOn : null]}
-            onPress={() => setImportOpen((open) => !open)}
-            accessibilityLabel="Import and export"
-            accessibilityState={{ expanded: importOpen }}
-            testID="favorites-import"
-          >
-            <Text style={styles.buttonQuietText}>Import · Export</Text>
-          </Pressable>
-          {places.length > 0 || tracks.length > 0 || collections.length > 0 ? (
-            <Pressable
-              style={styles.headerIcon}
-              onPress={() => onSetAllVisible(!allShown)}
-              accessibilityLabel={
-                allShown ? 'Hide everything on the map' : 'Show everything on the map'
-              }
-              testID="toggle-all-visible"
-            >
-              <EyeIcon off={!allShown} />
-            </Pressable>
-          ) : null}
+          <ActionMenu
+            title="Collections"
+            testID="collections-more"
+            actions={[
+              {
+                label: 'Import · Export',
+                onPress: () => setImportOpen((open) => !open),
+                testID: 'favorites-import',
+              },
+              {
+                label: reordering ? 'Done reordering' : 'Reorder',
+                onPress: () => {
+                  setView('folders');
+                  setReordering((value) => !value);
+                },
+                testID: 'collections-reorder',
+              },
+              {
+                label: allShown ? 'Hide everything from map' : 'Show everything on map',
+                onPress: () => onSetAllVisible(!allShown),
+                testID: 'toggle-all-visible',
+              },
+            ]}
+          />
           <Pressable
             style={styles.headerIcon}
             onPress={onClose}
@@ -1640,64 +1692,115 @@ export function FavoritesSheet({
       ) : null}
 
       <View style={styles.tabBar} accessibilityRole="tablist">
-        {(['folders', 'places', 'courses', 'activities'] as const).map((item) => (
+        {(['folders', 'courses', 'activities'] as const).map((item) => (
           <Pressable
             key={item}
-            style={[styles.tab, view === item && styles.tabOn]}
+            style={[
+              styles.tab,
+              (view === item || (item === 'folders' && view === 'places')) && styles.tabOn,
+            ]}
             onPress={() => showView(item)}
             accessibilityRole="tab"
-            accessibilityState={{ selected: view === item }}
+            accessibilityState={{
+              selected: view === item || (item === 'folders' && view === 'places'),
+            }}
             testID={`collections-view-${item}`}
           >
             <Text
-              style={[styles.tabText, view === item && styles.tabTextOn]}
+              style={[
+                styles.tabText,
+                (view === item || (item === 'folders' && view === 'places')) && styles.tabTextOn,
+              ]}
               numberOfLines={1}
               adjustsFontSizeToFit
             >
-              {VIEW_LABELS[item]}
+              {item === 'folders' ? 'Places' : VIEW_LABELS[item]}
             </Text>
           </Pressable>
         ))}
       </View>
-      <View style={styles.filterRow}>
-        <TextInput
-          style={[styles.textField, styles.filterInput]}
-          value={filter}
-          onChangeText={(text) => {
-            setFilter(text);
-            setTrackLimit(TRACK_PAGE);
-            setPlaceLimit(PLACE_PAGE);
-          }}
-          placeholder={
-            view === 'folders'
-              ? 'Filter by name, #tag or notes'
-              : `Filter ${VIEW_LABELS[view].toLocaleLowerCase()}`
-          }
-          autoCapitalize="none"
-          autoCorrect={false}
-          returnKeyType="search"
-          accessibilityLabel="Filter collections"
-          testID="collections-filter"
-        />
-        {filterTag !== null ? (
-          <PinLabelToggle
-            on={tagHasPinLabels(pinLabels.prefs, filterTag)}
-            what={`#${filterTag}`}
-            onToggle={() => void pinLabels.toggleTag(filterTag)}
-            testID="collections-filter-labels"
-          />
-        ) : null}
-        {filtered.active ? (
+      {view === 'folders' || view === 'places' ? (
+        <View style={styles.summaryRow}>
           <Pressable
-            style={[styles.button, styles.buttonQuiet]}
-            onPress={() => setFilter('')}
-            accessibilityLabel="Clear filter"
-            testID="collections-filter-clear"
+            onPress={() => {
+              showView('folders');
+              openFolder(null);
+            }}
+            testID="collections-places-folders"
           >
-            <Text style={styles.buttonQuietText}>✕</Text>
+            <Text style={view === 'folders' ? styles.link : styles.muted}>Folders</Text>
           </Pressable>
-        ) : null}
-      </View>
+          <Pressable onPress={() => showView('places')} testID="collections-view-places">
+            <Text style={view === 'places' ? styles.link : styles.muted}>All places</Text>
+          </Pressable>
+          {view === 'places' ? (
+            <FilterMenu
+              label="Sort"
+              allLabel="Name"
+              value={placeSort === 'name' ? null : placeSort}
+              options={[
+                { key: 'recent', label: 'Recently added' },
+                { key: 'folder', label: 'Folder' },
+              ]}
+              onChange={(value) => {
+                setPlaceSort(value ?? 'name');
+                scrollRef.current?.scrollTo({ y: 0, animated: false });
+                setPlaceLimit(PLACE_PAGE);
+              }}
+              testID="places-sort"
+            />
+          ) : null}
+        </View>
+      ) : null}
+      {reordering ? (
+        <View style={styles.summaryRow}>
+          <Text style={styles.muted}>Drag to reorder. Hold a row anytime to move it.</Text>
+          <Pressable onPress={() => setReordering(false)} testID="collections-reorder-done">
+            <Text style={styles.link}>Done</Text>
+          </Pressable>
+        </View>
+      ) : null}
+      {view === 'folders' || view === 'places' || viewSource.length > 0 ? (
+        <View style={styles.filterRow}>
+          <TextInput
+            style={[styles.textField, styles.filterInput]}
+            value={filter}
+            onChangeText={(text) => {
+              setFilter(text);
+              setTrackLimit(TRACK_PAGE);
+              setPlaceLimit(PLACE_PAGE);
+            }}
+            placeholder={
+              view === 'folders'
+                ? 'Search folders and places'
+                : `Filter ${VIEW_LABELS[view].toLocaleLowerCase()}`
+            }
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="search"
+            accessibilityLabel="Filter collections"
+            testID="collections-filter"
+          />
+          {filterTag !== null ? (
+            <PinLabelToggle
+              on={tagHasPinLabels(pinLabels.prefs, filterTag)}
+              what={`#${filterTag}`}
+              onToggle={() => void pinLabels.toggleTag(filterTag)}
+              testID="collections-filter-labels"
+            />
+          ) : null}
+          {filtered.active ? (
+            <Pressable
+              style={[styles.button, styles.buttonQuiet]}
+              onPress={() => setFilter('')}
+              accessibilityLabel="Clear filter"
+              testID="collections-filter-clear"
+            >
+              <Text style={styles.buttonQuietText}>✕</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
       {view === 'courses' || view === 'activities' ? libraryFilters() : null}
       {view === 'folders' && !filtered.active && current ? folderHeader(current.folder) : null}
 
@@ -1710,21 +1813,73 @@ export function FavoritesSheet({
           scrollY.current = event.nativeEvent.contentOffset.y;
         }}
         scrollEventThrottle={16}
+        testID="collections-scroll"
       >
         {/* A filter that matched nothing is not an empty collection: saying
             "nothing saved yet" to someone whose pins are all still there reads
             as data loss. */}
-        {view === 'folders' && filtered.active && filtered.empty ? (
+        {(view === 'folders' || view === 'places') &&
+        !filtered.active &&
+        (view === 'places' || !current) ? (
+          <View>
+            <Text style={styles.sectionLabel}>Quick access</Text>
+            {places.some(isQuickAccess) ? (
+              <View>
+                {places.filter(isQuickAccess).map((place) => (
+                  <View style={styles.row} key={`quick:${place.id}`}>
+                    <Pressable
+                      style={styles.rowMain}
+                      onPress={() => {
+                        onFlyTo(place);
+                        onClose();
+                      }}
+                      testID={`quick-place-${place.id}`}
+                    >
+                      <Text style={styles.rowText} numberOfLines={2}>
+                        {place.icon} {libraryPlaceName(place)}
+                      </Text>
+                    </Pressable>
+                    <ActionMenu
+                      title={`Quick access ${libraryPlaceName(place)}`}
+                      testID={`quick-more-${place.id}`}
+                      actions={[
+                        {
+                          label: 'Remove from Quick access',
+                          onPress: () => onPatch(place.id, { tags: quickAccessTags(place) }),
+                          testID: `quick-remove-${place.id}`,
+                        },
+                      ]}
+                    />
+                    <Pressable
+                      style={styles.buttonQuiet}
+                      accessibilityLabel={`Directions to ${place.name}`}
+                      onPress={() => {
+                        onNavigate(place);
+                        onClose();
+                      }}
+                    >
+                      <Text style={styles.link}>Go</Text>
+                    </Pressable>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <Text style={styles.muted}>Pin Home, Work or any place here from its ⋯ menu.</Text>
+            )}
+            <Text style={styles.sectionLabel}>{view === 'places' ? 'All places' : 'Folders'}</Text>
+          </View>
+        ) : null}
+        {(view === 'folders' || view === 'places') && filtered.active && filtered.empty ? (
           <Text style={styles.muted}>Nothing here matches “{filter.trim()}”.</Text>
         ) : null}
         {view === 'activities' && garmin.connected ? garminActivitiesCard() : null}
-        {view === 'folders'
+        {view === 'folders' || (view === 'places' && filtered.active)
           ? filtered.active
             ? renderResults()
             : renderLevel()
           : view === 'places'
             ? filtered.places.length > 0
-              ? renderPlaces(filtered.places, true)
+              ? renderPlaces(libraryPlaces(filtered.places, collections, placeSort), true)
               : libraryEmpty()
             : viewTracks.length > 0
               ? renderTracks(viewTracks, true)
@@ -1878,7 +2033,7 @@ const styles = StyleSheet.create({
   muted: { fontSize: 13, color: theme.textMuted, marginTop: 2 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
   rowRevealed: { backgroundColor: theme.accentFaint, borderRadius: 8 },
-  rowHidden: { opacity: 0.45 },
+  mapState: { fontSize: 11, color: theme.textMuted, marginTop: 2 },
   eyeButton: { paddingHorizontal: 2, paddingVertical: 4 },
   folderIcon: { fontSize: 20 },
   // The whole name block opens the folder: icon, name and contents line.

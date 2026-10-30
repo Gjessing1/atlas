@@ -1,17 +1,19 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { PanResponder, StyleSheet, Text, View } from 'react-native';
 
 import { theme } from './theme';
 
 /**
  * Long-lists drag-to-arrange without native gesture libs (keeps the feature
- * OTA-updatable): each row gets a ≡ handle wired to a PanResponder; while a
+ * OTA-updatable): each row supports holding to grab it; Reorder reveals handles; while a
  * row is held, the rows in between shift out of its way, and releasing calls
  * `onMove` with the crossed sibling and edge. The enclosing ScrollView must
  * freeze while a drag is live — hence `onDragActive`.
  */
 export function ReorderableList<T>({
   items,
+  showHandles = true,
+  holdToDrag = false,
   keyOf,
   renderRow,
   onMove,
@@ -19,6 +21,8 @@ export function ReorderableList<T>({
   onDropAt,
 }: {
   items: T[];
+  showHandles?: boolean;
+  holdToDrag?: boolean;
   keyOf: (item: T) => string;
   /** Render one row; place `handle` where the drag grip should sit. */
   renderRow: (item: T, handle: React.ReactNode) => React.ReactNode;
@@ -33,6 +37,19 @@ export function ReorderableList<T>({
    */
   onDropAt?: (item: T, pageY: number) => boolean;
 }) {
+  const hold = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const armed = useRef<string | null>(null);
+  const touch = useRef({ x: 0, y: 0 });
+  const clearHold = () => {
+    if (hold.current) clearTimeout(hold.current);
+    hold.current = null;
+  };
+  useEffect(
+    () => () => {
+      if (hold.current) clearTimeout(hold.current);
+    },
+    [],
+  );
   // Measured row heights by index (rows include any expanded editor below them).
   const heightsRef = useRef<number[]>([]);
   const [drag, setDrag] = useState<{ from: number; to: number; dy: number } | null>(null);
@@ -75,7 +92,8 @@ export function ReorderableList<T>({
     if (!responder) {
       responder = PanResponder.create({
         onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponderCapture: () => armed.current === key,
+        onMoveShouldSetPanResponder: () => armed.current === key,
         onPanResponderGrant: () => {
           const from = itemsRef.current.findIndex((it) => keyOf(it) === key);
           if (from < 0) return;
@@ -89,6 +107,8 @@ export function ReorderableList<T>({
         },
         onPanResponderRelease: (_event, gesture) => {
           const cur = dragRef.current;
+          armed.current = null;
+          clearHold();
           setDrag(null);
           onDragActiveRef.current(false);
           const item = itemsRef.current.find((candidate) => keyOf(candidate) === key);
@@ -100,6 +120,8 @@ export function ReorderableList<T>({
           }
         },
         onPanResponderTerminate: () => {
+          armed.current = null;
+          clearHold();
           setDrag(null);
           onDragActiveRef.current(false);
         },
@@ -125,6 +147,44 @@ export function ReorderableList<T>({
         return (
           <View
             key={key}
+            {...responderFor(key).panHandlers}
+            onStartShouldSetResponder={() => false}
+            onTouchStart={(e) => {
+              if (!holdToDrag) return;
+              clearHold();
+              touch.current = { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY };
+              hold.current = setTimeout(() => {
+                armed.current = key;
+                const from = itemsRef.current.findIndex((it) => keyOf(it) === key);
+                if (from < 0) return;
+                onDragActiveRef.current(true);
+                setDrag({ from, to: from, dy: 0 });
+              }, 450);
+            }}
+            onTouchMove={(e) => {
+              if (
+                !armed.current &&
+                Math.hypot(
+                  e.nativeEvent.pageX - touch.current.x,
+                  e.nativeEvent.pageY - touch.current.y,
+                ) > 8
+              )
+                clearHold();
+            }}
+            onTouchCancel={() => {
+              clearHold();
+              armed.current = null;
+              setDrag(null);
+              onDragActiveRef.current(false);
+            }}
+            onTouchEnd={() => {
+              clearHold();
+              if (armed.current && !dragRef.current?.dy) {
+                armed.current = null;
+                setDrag(null);
+                onDragActiveRef.current(false);
+              }
+            }}
             onLayout={(e) => {
               heightsRef.current[index] = e.nativeEvent.layout.height;
             }}
@@ -135,9 +195,15 @@ export function ReorderableList<T>({
           >
             {renderRow(
               item,
-              <View {...responderFor(key).panHandlers} style={styles.handle} testID={`drag-${key}`}>
-                <Text style={styles.handleText}>≡</Text>
-              </View>,
+              showHandles ? (
+                <View
+                  {...responderFor(key).panHandlers}
+                  style={styles.handle}
+                  testID={`drag-${key}`}
+                >
+                  <Text style={styles.handleText}>⠿</Text>
+                </View>
+              ) : null,
             )}
           </View>
         );

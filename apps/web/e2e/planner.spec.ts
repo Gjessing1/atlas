@@ -31,6 +31,10 @@ test('map planner adds, inserts, drags, removes and undoes points', async ({ pag
   await page.getByRole('button', { name: 'Undo point edit' }).click();
   await expect(page.locator('.route-waypoint-marker')).toHaveCount(4);
 
+  // Undo may frame the first marker under the elevation panel. Close that
+  // surface just as a user would before choosing a map point.
+  const profileClose = page.getByRole('button', { name: 'Close profile', exact: true });
+  if (await profileClose.isVisible()) await profileClose.click();
   await page.locator('.route-waypoint-marker').first().click();
   await page
     .locator('.route-point-actions')

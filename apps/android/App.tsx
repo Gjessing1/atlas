@@ -2169,8 +2169,8 @@ function AppInner() {
               fetchNearby={fetchNearbyStops}
               onExport={exportRoute}
               onShareLink={shareRouteLink}
-              onSaveTrack={async (trackData, name, collectionId) =>
-                (await data.saveTrack(trackData, name, collectionId)) !== null
+              onSaveTrack={async (trackData, name, collectionId, metadata) =>
+                (await data.saveTrack(trackData, name, collectionId, metadata)) !== null
               }
               onNavigate={startNavigation}
               onOpenVehicleSettings={openVehicleSettings}

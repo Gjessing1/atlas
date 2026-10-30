@@ -1,3 +1,5 @@
+import { libraryEditableTags } from './libraryViews.js';
+
 /**
  * Filtering the collections tree — one matcher for both apps.
  *
@@ -62,7 +64,7 @@ export function tagQuery(tag: string): string {
 export function collectionTagSuggestions(records: readonly FilterableRecord[]): string[] {
   const tags = new Map<string, string>();
   for (const record of records) {
-    for (const raw of record.tags ?? []) {
+    for (const raw of libraryEditableTags(record.tags ?? [])) {
       const tag = raw.trim();
       const key = tag.toLocaleLowerCase();
       if (tag && !tags.has(key)) tags.set(key, tag);

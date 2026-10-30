@@ -1681,8 +1681,8 @@ export function App() {
             garmin={garmin}
             onOpenGarminSettings={openGarminSettings}
             onStartTransitGuidance={startTransitGuidance}
-            onSaveTrack={async (data, name, collectionId) =>
-              (await userData.saveTrack(data, name, collectionId)) !== null
+            onSaveTrack={async (data, name, collectionId, metadata) =>
+              (await userData.saveTrack(data, name, collectionId, metadata)) !== null
             }
           />
         )}

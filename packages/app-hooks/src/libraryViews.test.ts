@@ -1,11 +1,21 @@
-import type { TrackRecord } from '@atlas/storage';
+import type { CollectionRecord, PlaceRecord, TrackRecord } from '@atlas/storage';
 import { expect, it } from 'vitest';
 import {
+  libraryEditableTags,
+  mergeLibraryTags,
+  libraryPlaceName,
+  libraryPlaces,
+  libraryPlaceLine,
+  libraryVisibility,
+  isQuickAccess,
+  quickAccessTags,
+  plannedRouteMetadata,
   activityYear,
   activityYearCounts,
   isAreaTrack,
   librarySportCounts,
   libraryTrackKind,
+  libraryTrackSport,
   libraryTrackLine,
   libraryTrackTags,
   libraryTracks,
@@ -108,4 +118,77 @@ it('keeps iNatur permit areas, old saves included, out of Routes & courses', () 
     libraryTracks([legacy, tagged, overlay, route], 'courses', null, null).map((t) => t.id),
   ).toEqual(['ridge']);
   expect([legacy, tagged, overlay, route].map(isAreaTrack)).toEqual([true, true, true, false]);
+});
+
+it('sorts activities by recording date in both directions and routes by distance or name', () => {
+  const a = {
+    ...track('Alpine', ['garmin:1', 'running'], 'Recorded 2024-06-01', 50),
+    stats: { distanceM: 5000 },
+  };
+  const b = {
+    ...track('Beach', ['garmin:2', 'running'], 'Recorded 2025-06-01', 1),
+    stats: { distanceM: 2000 },
+  };
+  expect(libraryTracks([a, b], 'activities', null, null, 'oldest').map((t) => t.id)).toEqual([
+    'Alpine',
+    'Beach',
+  ]);
+  expect(libraryTracks([a, b], 'activities', null, null, 'newest').map((t) => t.id)).toEqual([
+    'Beach',
+    'Alpine',
+  ]);
+  expect(libraryTracks([a, b], 'activities', null, null, 'distance').map((t) => t.id)).toEqual([
+    'Alpine',
+    'Beach',
+  ]);
+});
+
+it('places use readable context, independent shortcuts and deterministic sort orders', () => {
+  const folder = { id: 'f', name: 'Cabins', parentId: null, visible: false } as CollectionRecord;
+  const home = {
+    id: 'h',
+    name: 'Home',
+    collectionId: 'f',
+    tags: ['family'],
+    visible: true,
+    address: '',
+    notes: 'By the lake',
+    createdAt: 1,
+    sortIndex: 1,
+  } as PlaceRecord;
+  const work = { ...home, id: 'w', name: 'Work', collectionId: null, createdAt: 2, sortIndex: 0 };
+  expect(libraryPlaces([work, home], [folder], 'name').map((p) => p.id)).toEqual(['h', 'w']);
+  expect(libraryPlaces([home, work], [folder], 'recent').map((p) => p.id)).toEqual(['w', 'h']);
+  expect(libraryPlaces([home, work], [folder], 'folder').map((p) => p.id)).toEqual(['w', 'h']);
+  expect(libraryPlaceLine(home, [folder])).toBe('Cabins · By the lake');
+  expect(isQuickAccess(home)).toBe(false);
+  const pinned = { ...home, tags: quickAccessTags(home) };
+  expect(isQuickAccess(pinned)).toBe(true);
+  expect(quickAccessTags(pinned)).toEqual(['family']);
+  expect(home.tags).toEqual(['family']);
+  expect(libraryPlaceName({ ...home, name: '59.9149, 10.7153' })).toBe('By the lake');
+  expect(
+    libraryEditableTags(['atlas-profile:bike', 'garmin:12', 'quick-access', 'family']),
+  ).toEqual(['family']);
+  expect(mergeLibraryTags(['atlas-profile:bike', 'quick-access', 'family'], ['cabin'])).toEqual([
+    'atlas-profile:bike',
+    'quick-access',
+    'cabin',
+  ]);
+  expect(libraryVisibility(home, [folder])).toBe('Hidden by Cabins');
+  expect(libraryVisibility({ ...home, visible: false }, [folder])).toBe('Hidden from map');
+  expect(libraryVisibility(work, [folder])).toBe('On map');
+  expect(libraryVisibility(home, [{ ...folder, visible: true, parentId: 'f' }])).toBe('On map');
+});
+
+it('new planner routes retain travel mode and estimated duration without exposing metadata tags', () => {
+  const metadata = plannedRouteMetadata({ profile: 'bike', durationMs: 3600000 });
+  const saved = {
+    ...track('Ride', metadata.tags, '', 1),
+    stats: { distanceM: 20000, ...metadata.stats },
+  };
+  expect(libraryTrackSport(saved)).toBe('Cycling');
+  expect(libraryTrackLine(saved)).toContain('Cycling');
+  expect(libraryTrackTags(saved)).toEqual([]);
+  expect(plannedRouteMetadata({ profile: 'car', durationMs: NaN }).stats).toEqual({});
 });

@@ -1,18 +1,23 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { closePlaceEditor, waitForMap } from './helpers';
+
+async function collectionAction(page: Page, title: string, label: string) {
+  await page.getByRole('button', { name: `More actions for ${title}`, exact: true }).click();
+  await page.getByRole('button', { name: label, exact: true }).click();
+}
 
 test('main search reveals nested saved folders and tracks in Collections', async ({ page }) => {
   await page.route('**/api/search**', (route) => route.fulfill({ json: { results: [] } }));
   await page.goto('/');
   await waitForMap(page);
   await page.getByRole('button', { name: 'Collections', exact: true }).click();
-  await page.getByRole('button', { name: 'New folder', exact: true }).click();
+  await collectionAction(page, 'Collections', 'New folder');
   await page.getByPlaceholder('New folder name').fill('Autumn trips');
   await page.getByPlaceholder('New folder name').press('Enter');
-  await page.getByRole('button', { name: 'New folder inside Autumn trips' }).click();
+  await collectionAction(page, 'Autumn trips', 'New folder inside Autumn trips');
   await page.getByPlaceholder('New folder name').fill('Ridge plans');
   await page.getByPlaceholder('New folder name').press('Enter');
-  await page.getByRole('button', { name: 'Import', exact: true }).click();
+  await collectionAction(page, 'Collections', 'Import');
   await page.getByLabel('Import into').selectOption({ label: 'Ridge plans' });
   await page.locator('input[type=file]').setInputFiles({
     name: 'Ridge route.gpx',
@@ -21,7 +26,7 @@ test('main search reveals nested saved folders and tracks in Collections', async
       '<?xml version="1.0"?><gpx version="1.1" creator="Atlas"><trk><name>Ridge route</name><trkseg><trkpt lat="59.9" lon="10.7"/><trkpt lat="59.91" lon="10.71"/></trkseg></trk></gpx>',
     ),
   });
-  await expect(page.getByRole('button', { name: 'Import', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Close profile' })).toBeVisible();
   await page.getByRole('button', { name: 'Close panel' }).click();
 
   const search = page.getByPlaceholder('Search places');
@@ -36,7 +41,7 @@ test('main search reveals nested saved folders and tracks in Collections', async
   await search.fill('Ridge route');
   await expect(page.getByRole('option', { name: /Ridge route Saved track/ })).toBeVisible();
   await page.getByRole('option', { name: /Ridge route Saved track/ }).click();
-  await expect(page.locator('.sidebar .item-row.revealed .item-name')).toHaveText('Ridge route');
+  await expect(page.locator('.sidebar .item-row.revealed .item-name')).toContainText('Ridge route');
   await expect(page.getByRole('button', { name: 'Collapse Autumn trips' })).toBeVisible();
 });
 
@@ -70,10 +75,10 @@ test('a nested collection can move up to the root', async ({ page }) => {
   await waitForMap(page);
   await page.getByRole('button', { name: 'Collections', exact: true }).click();
 
-  await page.getByRole('button', { name: 'New folder', exact: true }).click();
+  await collectionAction(page, 'Collections', 'New folder');
   await page.getByPlaceholder('New folder name').fill('Parent');
   await page.getByPlaceholder('New folder name').press('Enter');
-  await page.getByRole('button', { name: 'New folder inside Parent' }).click();
+  await collectionAction(page, 'Parent', 'New folder inside Parent');
   await page.getByPlaceholder('New folder name').fill('Child');
   await page.getByPlaceholder('New folder name').press('Enter');
 
@@ -82,7 +87,7 @@ test('a nested collection can move up to the root', async ({ page }) => {
   });
   await expect(parent.locator(':scope > .item-list .folder-name')).toHaveText('Child');
 
-  await page.getByRole('button', { name: 'Move Child up one level' }).click();
+  await collectionAction(page, 'Child', 'Move Child up one level');
   await expect(parent.locator(':scope > .item-list .folder-name')).toHaveCount(0);
   await expect(
     page.locator('.sidebar-body > .item-list > .folder-row > .item-line > .folder-name'),
@@ -96,7 +101,7 @@ test('a subfolder can be created inside a collapsed folder, and deletes are conf
   await waitForMap(page);
   await page.getByRole('button', { name: 'Collections', exact: true }).click();
 
-  await page.getByRole('button', { name: 'New folder', exact: true }).click();
+  await collectionAction(page, 'Collections', 'New folder');
   await page.getByPlaceholder('New folder name').fill('Trips');
   await page.getByPlaceholder('New folder name').press('Enter');
 
@@ -104,7 +109,7 @@ test('a subfolder can be created inside a collapsed folder, and deletes are conf
   await expect(page.getByRole('button', { name: 'Expand Trips' })).toBeVisible();
   // Being collapsed must not make "+" a dead button: it re-expands and shows
   // the field rather than rendering it into a hidden subtree.
-  await page.getByRole('button', { name: 'New folder inside Trips' }).click();
+  await collectionAction(page, 'Trips', 'New folder inside Trips');
   await page.getByPlaceholder('New folder name').fill('Autumn');
   await page.getByPlaceholder('New folder name').press('Enter');
 
@@ -114,11 +119,11 @@ test('a subfolder can be created inside a collapsed folder, and deletes are conf
   await expect(trips.locator(':scope > .item-list .folder-name')).toHaveText('Autumn');
 
   // Delete asks first — cancelling keeps the folder.
-  await page.getByRole('button', { name: 'Delete Autumn' }).click();
+  await collectionAction(page, 'Autumn', 'Delete Autumn');
   await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel' }).click();
   await expect(trips.locator(':scope > .item-list .folder-name')).toHaveText('Autumn');
 
-  await page.getByRole('button', { name: 'Delete Autumn' }).click();
+  await collectionAction(page, 'Autumn', 'Delete Autumn');
   await page.getByRole('alertdialog').getByRole('button', { name: 'Delete folder' }).click();
   await expect(trips.locator(':scope > .item-list .folder-name')).toHaveCount(0);
   await expect(page.locator('.undo-toast')).toBeVisible();
@@ -130,7 +135,7 @@ test('a folder can be dragged into another folder', async ({ page }) => {
   await page.getByRole('button', { name: 'Collections', exact: true }).click();
 
   for (const name of ['Alpha', 'Beta']) {
-    await page.getByRole('button', { name: 'New folder', exact: true }).click();
+    await collectionAction(page, 'Collections', 'New folder');
     await page.getByPlaceholder('New folder name').fill(name);
     await page.getByPlaceholder('New folder name').press('Enter');
   }
@@ -202,15 +207,15 @@ test('the tree can be filtered by name and by a tapped tag', async ({ page }) =>
   await page.keyboard.press('Escape');
 
   await page.getByRole('button', { name: 'Collections', exact: true }).click();
-  await page.getByRole('button', { name: 'New folder', exact: true }).click();
+  await collectionAction(page, 'Collections', 'New folder');
   await page.getByPlaceholder('New folder name').fill('Stands');
   await page.getByPlaceholder('New folder name').press('Enter');
-  await page.getByRole('button', { name: 'New folder', exact: true }).click();
+  await collectionAction(page, 'Collections', 'New folder');
   await page.getByPlaceholder('New folder name').fill('Fishing');
   await page.getByPlaceholder('New folder name').press('Enter');
 
   // Tag the place, so the chip has something to say.
-  await page.getByRole('button', { name: 'Edit Elgpost nord' }).click();
+  await collectionAction(page, 'Elgpost nord', 'Edit Elgpost nord');
   await page.getByLabel('Tags').fill('hunt, stand');
   await page.keyboard.press('Tab');
   await expect(page.getByRole('button', { name: 'Filter by stand' })).toBeVisible();
@@ -227,7 +232,7 @@ test('the tree can be filtered by name and by a tapped tag', async ({ page }) =>
   await page.getByRole('button', { name: 'Clear filter' }).click();
   await page.getByRole('button', { name: 'Filter by stand' }).click();
   await expect(filter).toHaveValue('#stand');
-  await expect(page.locator('.item-name')).toHaveText(['Elgpost nord']);
+  await expect(page.locator('.item-name')).toHaveText([/Elgpost nord/]);
   await expect(page.locator('.folder-name')).toHaveCount(0);
 });
 
@@ -328,18 +333,21 @@ test('a folder or a tag can label its pins on the map', async ({ page }) => {
   expect(await labelled()).toBeNull();
 
   await page.getByRole('button', { name: 'Collections', exact: true }).click();
-  await page.getByRole('button', { name: 'New folder', exact: true }).click();
+  await collectionAction(page, 'Collections', 'New folder');
   await page.getByPlaceholder('New folder name').fill('Family');
   await page.getByPlaceholder('New folder name').press('Enter');
-  await page.getByRole('button', { name: 'Edit Mormor' }).click();
+  await collectionAction(page, 'Mormor', 'Edit Mormor');
   // Filed into the (collapsed) folder, the row and its editor leave the root.
   await page.getByRole('combobox', { name: /^Folder/ }).selectOption({ label: 'Family' });
 
   // The folder's switch names its pins, and only them.
   const folderSwitch = page.getByRole('button', { name: 'Names of Family on the map' });
+  await page.getByRole('button', { name: 'More actions for Family', exact: true }).click();
   await expect(folderSwitch).toHaveAttribute('aria-pressed', 'false');
   await folderSwitch.click();
+  await page.getByRole('button', { name: 'More actions for Family', exact: true }).click();
   await expect(folderSwitch).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Escape');
   await expect.poll(labelled).toEqual(['Mormor']);
 
   // A whole #tag in the filter offers the same switch for that tag.
@@ -352,10 +360,188 @@ test('a folder or a tag can label its pins on the map', async ({ page }) => {
 
   // A hidden folder takes its names with it; switching both off removes the layer.
   await page.getByRole('button', { name: 'Clear filter' }).click();
-  await page.getByRole('button', { name: 'Hide collection Family from map' }).click();
+  await collectionAction(page, 'Family', 'Hide collection Family from map');
   await expect.poll(labelled).toEqual(['Elgpost nord']);
-  await folderSwitch.click();
+  await collectionAction(page, 'Family', 'Names of Family on the map');
   await filter.fill('#stand');
   await page.getByRole('button', { name: 'Names of #stand on the map' }).click();
   await expect.poll(labelled).toBeNull();
+});
+
+test('Places offers Quick access, human context, sorting, and clear inherited visibility', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await waitForMap(page);
+  await page.getByRole('button', { name: 'Collections', exact: true }).click();
+  const library = page.locator('.sidebar');
+  await expect(library.getByRole('tab')).toHaveText(['Places', 'Routes', 'Activities']);
+  await expect(library.getByRole('button', { name: 'Import', exact: true })).toHaveCount(0);
+  await collectionAction(page, 'Collections', 'Import');
+  const common = { visible: true, createdAt: 1, updatedAt: 1 };
+  const places = [
+    {
+      ...common,
+      id: 'home',
+      name: 'Home with a long and recognizable place name',
+      lat: 59.9149,
+      lng: 10.7153,
+      collectionId: 'family',
+      notes: '',
+      address: 'Oslo',
+      tags: [],
+      icon: '⌂',
+      color: '#ff0000',
+      sortIndex: 0,
+    },
+    {
+      ...common,
+      id: 'work',
+      name: 'Work',
+      lat: 59.92,
+      lng: 10.72,
+      collectionId: null,
+      notes: 'Office',
+      address: '',
+      tags: [],
+      icon: '●',
+      color: '#ff0000',
+      sortIndex: 1,
+      createdAt: 2,
+    },
+  ];
+  await library.locator('input[accept=".gpx,.kml,.kmz,.json,.zip"]').setInputFiles({
+    name: 'library.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(
+      JSON.stringify({
+        exportedAt: 10,
+        collections: [
+          {
+            ...common,
+            id: 'family',
+            name: 'Family',
+            parentId: null,
+            visible: false,
+            sortIndex: 0,
+          },
+        ],
+        places,
+        tracks: [],
+        settings: {},
+      }),
+    ),
+  });
+  await expect(library).toContainText('Restored');
+  await library.getByRole('button', { name: 'All places', exact: true }).click();
+  const rows = library.locator('.sidebar-body > .item-list .item-name');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.first()).toContainText('Home');
+  await expect(rows.first()).toContainText('Family · Oslo');
+  await expect(rows.first()).toContainText('Hidden by Family');
+  await expect(rows.first()).toHaveAccessibleDescription(/Hidden by Family/);
+  await expect(rows.first()).toHaveCSS('opacity', '1');
+  await expect(library.locator('.sidebar-body')).not.toContainText('59.9149');
+  await library.getByLabel('Sort places').selectOption('recent');
+  await expect(rows.first()).toContainText('Work');
+  await collectionAction(
+    page,
+    'Home with a long and recognizable place name',
+    'Pin to Quick access',
+  );
+  await expect(library.locator('.quick-access')).toContainText(
+    'Home with a long and recognizable place name',
+  );
+  await page.reload();
+  await waitForMap(page);
+  await page.getByRole('button', { name: 'Collections', exact: true }).click();
+  await expect(page.locator('.quick-access')).toContainText(
+    'Home with a long and recognizable place name',
+  );
+  await page.getByLabel('Filter collections').fill('Family');
+  await expect(page.locator('.folder-name')).toHaveText(['Family']);
+  await expect(page.locator('.item-name')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Family', exact: true }).click();
+  await expect(page.getByLabel('Filter collections')).toHaveValue('');
+  await expect(page.getByRole('button', { name: 'Collapse Family' })).toBeVisible();
+});
+
+test('empty Routes hides search and offers useful actions', async ({ page }) => {
+  await page.goto('/');
+  await waitForMap(page);
+  await page.getByRole('button', { name: 'Collections', exact: true }).click();
+  await page.getByRole('tab', { name: 'Routes', exact: true }).click();
+  await expect(page.getByLabel('Filter collections')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Import GPX / KML' })).toBeVisible();
+  await page.getByRole('button', { name: 'Back to map to plan a route' }).click();
+  await expect(page.locator('.sidebar')).toHaveCount(0);
+});
+
+test('large libraries page their lists without changing map visibility', async ({ page }) => {
+  await page.goto('/');
+  await waitForMap(page);
+  await page.getByRole('button', { name: 'Collections', exact: true }).click();
+  await collectionAction(page, 'Collections', 'Import');
+  const common = {
+    visible: false,
+    createdAt: 1,
+    updatedAt: 1,
+    notes: '',
+    tags: [],
+    collectionId: 'guide',
+  };
+  const places = Array.from({ length: 780 }, (_, index) => ({
+    ...common,
+    id: `guide-${index}`,
+    name: `Stop ${String(index).padStart(3, '0')}`,
+    lat: 59.9,
+    lng: 10.7,
+    address: 'Norway',
+    icon: '●',
+    color: '#ff0000',
+    sortIndex: index,
+  }));
+  const tracks = Array.from({ length: 225 }, (_, index) => ({
+    ...common,
+    id: `activity-${index}`,
+    name: `Activity ${String(index).padStart(3, '0')}`,
+    notes: `Recorded ${2022 + (index % 4)}-01-01`,
+    tags: [`garmin:${index}`, 'cycling'],
+    stats: { distanceM: 1000 + index },
+    area: null,
+    gpx: '<gpx><trk><trkseg><trkpt lat="59.9" lon="10.7"/><trkpt lat="59.91" lon="10.71"/></trkseg></trk></gpx>',
+  }));
+  await page.locator('input[accept=".gpx,.kml,.kmz,.json,.zip"]').setInputFiles({
+    name: 'large-library.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(
+      JSON.stringify({
+        exportedAt: 10,
+        collections: [
+          { ...common, id: 'guide', name: 'Bobilguiden', parentId: null, sortIndex: 0 },
+        ],
+        places,
+        tracks,
+        settings: {},
+      }),
+    ),
+  });
+  const library = page.locator('.sidebar');
+  await expect(library).toContainText('780 places');
+  await library.getByRole('button', { name: 'All places', exact: true }).click();
+  await expect(library.locator('.item-row')).toHaveCount(40);
+  await library.getByRole('button', { name: 'Show more places (740 remaining)' }).click();
+  await expect(library.locator('.item-row')).toHaveCount(80);
+  await library.getByLabel('Filter collections').fill('Activity');
+  await expect(library.locator('.item-row')).toHaveCount(0);
+  await library.getByRole('button', { name: 'Clear filter' }).click();
+  await library.getByRole('tab', { name: 'Activities', exact: true }).click();
+  await expect(library.locator('.item-row')).toHaveCount(30);
+  await library.getByRole('button', { name: 'Show more (195 remaining)' }).click();
+  await expect(library.locator('.item-row')).toHaveCount(60);
+  await library.getByLabel('Sort tracks').selectOption('oldest');
+  await expect(library.locator('.item-name').first()).toContainText('Activity 000');
+  await expect(page.locator('.place-marker')).toHaveCount(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: 'test-results/collections-mobile.png' });
 });

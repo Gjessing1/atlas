@@ -1,4 +1,10 @@
-import { includesTag, parseTagList, toggleTag } from '@atlas/app-hooks';
+import {
+  libraryEditableTags,
+  mergeLibraryTags,
+  includesTag,
+  parseTagList,
+  toggleTag,
+} from '@atlas/app-hooks';
 import { PLACE_COLORS, PLACE_ICONS } from '@atlas/core';
 import type { CollectionRecord } from '@atlas/storage';
 import { useState } from 'react';
@@ -49,12 +55,13 @@ export function ItemEditor({
   actions,
   tagSuggestions = [],
 }: EditorProps) {
-  const [tagText, setTagText] = useState(tags.join(', '));
+  const [tagText, setTagText] = useState(libraryEditableTags(tags).join(', '));
   const typedTags = parseTagList(tagText);
   // Auto-saved like every other field, but only when the list really changed:
   // blur fires on every tab through the editor.
   const commitTags = (next: string[]) => {
-    if (next.join('\n') !== tags.join('\n')) onPatch({ tags: next });
+    if (next.join('\n') !== libraryEditableTags(tags).join('\n'))
+      onPatch({ tags: mergeLibraryTags(tags, next) });
   };
   return (
     <div className="item-editor">

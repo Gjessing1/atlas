@@ -1,4 +1,10 @@
-import { includesTag, parseTagList, toggleTag } from '@atlas/app-hooks';
+import {
+  libraryEditableTags,
+  mergeLibraryTags,
+  includesTag,
+  parseTagList,
+  toggleTag,
+} from '@atlas/app-hooks';
 import { PLACE_COLORS, PLACE_ICONS } from '@atlas/core';
 import type { CollectionRecord } from '@atlas/storage';
 import { useState, type ReactNode } from 'react';
@@ -91,7 +97,7 @@ export function ItemEditor({
   const [color, setColor] = useState(style?.color ?? '');
   const [folderId, setFolderId] = useState(collectionId);
   const [notesValue, setNotesValue] = useState(notes);
-  const [tagsValue, setTagsValue] = useState(tags.join(', '));
+  const [tagsValue, setTagsValue] = useState(libraryEditableTags(tags).join(', '));
   const Noun = noun[0]!.toUpperCase() + noun.slice(1);
   const typedTags = parseTagList(tagsValue);
 
@@ -107,7 +113,7 @@ export function ItemEditor({
       ...(style ? { icon, color } : {}),
       collectionId: folderId,
       notes: notesValue,
-      tags: typedTags,
+      tags: mergeLibraryTags(tags, typedTags),
     });
     onClose();
   };

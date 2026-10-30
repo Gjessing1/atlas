@@ -362,12 +362,19 @@ describe('useUserData', () => {
         },
         'Oslo ride',
         folder.id,
+        { profile: 'bike', durationMs: 1800000 },
       );
       savedId = saved?.id ?? '';
     });
 
     expect(result.current.tracks).toMatchObject([
-      { id: savedId, name: 'Oslo ride', collectionId: folder.id },
+      {
+        id: savedId,
+        name: 'Oslo ride',
+        collectionId: folder.id,
+        tags: ['atlas-profile:bike'],
+        stats: { durationMs: 1800000 },
+      },
     ]);
     const gpx = await storage.getTrackGpx(savedId);
     expect(parseGpx(gpx!).name).toBe('Oslo ride');

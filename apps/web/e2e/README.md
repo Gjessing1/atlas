@@ -90,3 +90,8 @@ Verified 2026-07-17 (Alder Lake-N iGPU, production build, live Photon +
 Valhalla): map startup (nav → first map idle) 1.81–1.87 s, animated
 rendering 59–60 FPS, search via `/api/search` 58–80 ms, `/api/route`
 27 ms (urban) – 262 ms (Oslo→Bergen), page load event ~120 ms.
+
+Planner geometry trap (2026-10-30): after Undo reframes a route, its first marker can sit beneath
+the elevation panel. A timed-out marker click whose call log says the profile SVG intercepts
+pointer events is an occluded map target. Close the profile before choosing that point, as a
+user must; do not force-click through the panel or change route logic for the test.

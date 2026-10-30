@@ -394,6 +394,20 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     android: { file: 'apps/android/src/ui/FavoritesSheet.tsx', contains: 'useCollectionTree' },
   },
   {
+    id: 'collections-quick-access',
+    surface: 'collections',
+    capability: 'Pin existing places to Quick access without duplicating them',
+    web: { file: 'apps/web/src/Sidebar.tsx', contains: 'quickAccessTags' },
+    android: { file: 'apps/android/src/ui/FavoritesSheet.tsx', contains: 'quickAccessTags' },
+  },
+  {
+    id: 'collections-list-sorting',
+    surface: 'collections',
+    capability: 'Sort places and tracks while preserving their map visibility',
+    web: { file: 'apps/web/src/Sidebar.tsx', contains: 'setPlaceSort' },
+    android: { file: 'apps/android/src/ui/FavoritesSheet.tsx', contains: 'setPlaceSort' },
+  },
+  {
     id: 'collections-new-folder',
     surface: 'collections',
     capability: 'Create a folder, including inside another folder',
@@ -469,7 +483,7 @@ export const PARITY_CHECKLIST: readonly ParityCapability[] = [
     web: { file: 'apps/web/src/Sidebar.tsx', contains: 'Hide all' },
     android: {
       file: 'apps/android/src/ui/FavoritesSheet.tsx',
-      contains: 'Hide everything on the map',
+      contains: 'Hide everything from map',
     },
   },
   {

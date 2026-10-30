@@ -8,6 +8,7 @@ import {
   type KmlFolder,
   type TrackData,
 } from '@atlas/gpx';
+import { plannedRouteMetadata, type SavedRouteMetadata } from './libraryViews.js';
 import { inaturSegments, inaturTrackName, type InaturArea } from '@atlas/core';
 import type {
   AtlasStorage,
@@ -255,6 +256,7 @@ export interface UserData<TFile> extends StorageAvailability {
     data: TrackData,
     name: string,
     collectionId?: string | null,
+    metadata?: SavedRouteMetadata,
   ) => Promise<TrackRecord | null>;
   /**
    * Save a resolved iNatur permit as a filled, synced area overlay with a GPX
@@ -740,15 +742,21 @@ export function useUserData<TFile>(platform: UserDataPlatform<TFile>): UserData<
       data: TrackData,
       name: string,
       collectionId: string | null = null,
+      metadata?: SavedRouteMetadata,
     ): Promise<TrackRecord | null> => {
       const s = storageRef.current;
       if (!s) return null;
       try {
+        const routeMetadata = plannedRouteMetadata(metadata);
         const savedName = name.trim() || data.name?.trim() || 'Planned route';
         const track = await s.createTrack({
           name: savedName,
           gpx: buildGpx({ ...data, name: savedName }),
-          stats: computeTrackStats(data) as unknown as Record<string, number>,
+          stats: { ...computeTrackStats(data), ...routeMetadata.stats } as unknown as Record<
+            string,
+            number
+          >,
+          tags: routeMetadata.tags,
           collectionId,
         });
         trackDataCache.current.set(track.id, data);

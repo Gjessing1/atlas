@@ -1,3 +1,4 @@
+import type { SavedRouteMetadata } from '@atlas/app-hooks';
 import {
   altChipLabel,
   fmtDistanceM,
@@ -299,7 +300,12 @@ export function RoutePanel({
    * needs the live camera, which lives up there with the map.
    */
   onShareLink: () => void;
-  onSaveTrack: (data: TrackData, name: string, collectionId: string | null) => Promise<boolean>;
+  onSaveTrack: (
+    data: TrackData,
+    name: string,
+    collectionId: string | null,
+    metadata: SavedRouteMetadata,
+  ) => Promise<boolean>;
   garmin: GarminState;
   onOpenGarminSettings: () => void;
   /**
@@ -1285,6 +1291,7 @@ export function RoutePanel({
                     routePathToTrackData(path, saveName.trim()),
                     saveName.trim(),
                     saveCollection,
+                    { profile: route.profile, durationMs: path.timeMs },
                   ).then((ok) => {
                     setSaving(false);
                     setSaved(ok);

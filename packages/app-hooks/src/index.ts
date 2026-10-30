@@ -331,3 +331,19 @@ export {
   type StandBoardStatus,
 } from './useStandBoard.js';
 export { planningArea, usePlanningAreas, type PlanningArea } from './usePlanningAreas.js';
+
+export {
+  libraryEditableTags,
+  mergeLibraryTags,
+  libraryPlaces,
+  libraryPlaceLine,
+  libraryPlaceName,
+  libraryVisibility,
+  isQuickAccess,
+  quickAccessTags,
+  QUICK_ACCESS_TAG,
+  type LibraryPlaceSort,
+  type LibraryTrackSort,
+} from './libraryViews.js';
+
+export { type SavedRouteMetadata } from './libraryViews.js';

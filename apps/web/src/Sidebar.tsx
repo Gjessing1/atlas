@@ -1,11 +1,19 @@
 import {
+  libraryPlaces,
+  libraryPlaceLine,
+  libraryPlaceName,
+  libraryVisibility,
+  isQuickAccess,
+  quickAccessTags,
+  libraryTrackLine,
+  libraryTrackTags,
+  type LibraryPlaceSort,
+  type LibraryTrackSort,
   ancestorFolderIds,
   collectionTagSuggestions,
   filterCollectionRecords,
-  activityDate,
   activityYears,
   librarySports,
-  libraryTrackKind,
   libraryTrackSport,
   libraryTracks,
   type LibraryView,
@@ -19,13 +27,14 @@ import {
 import {
   folderHasPinLabels,
   tagHasPinLabels,
-  trackSummary,
+  garminSportIcon,
   visibleOnMap,
   type CollectionRevealTarget,
 } from '@atlas/core';
 import type { ImportSummary, PlaceRecord, TrackRecord } from '@atlas/storage';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EyeIcon, FolderIcon, PinLabelIcon } from './icons.js';
+import { CollectionMenu } from './sidebar/CollectionMenu.js';
 import { GarminCourses } from './settings/GarminCourses.js';
 import type { ConfirmRequest } from './sidebar/ConfirmDialog.js';
 import { ConfirmDialog } from './sidebar/ConfirmDialog.js';
@@ -230,16 +239,25 @@ export function Sidebar({
   // filter is a way of looking at the list, not a property of it.
   const [filter, setFilter] = useState('');
   const [view, setView] = useState<LibraryView>('folders');
+  const [placeSort, setPlaceSort] = useState<LibraryPlaceSort>('name');
+  const [trackSort, setTrackSort] = useState<LibraryTrackSort>('newest');
+  const [reordering, setReordering] = useState(false);
+  const [placeLimit, setPlaceLimit] = useState(40);
+  const [trackLimit, setTrackLimit] = useState(30);
   const [sport, setSport] = useState<string | null>(null);
   const [year, setYear] = useState<number | null>(null);
   const { drag, dropClass, dragProps, dropOnPlace, dropOnFolder } = useSidebarDnd(data);
   const filtered = useMemo(
     () =>
       filterCollectionRecords(
-        { collections: data.collections, places: data.places, tracks: data.tracks },
+        {
+          collections: data.collections,
+          places: data.places,
+          tracks: view === 'places' ? [] : data.tracks,
+        },
         filter,
       ),
-    [data.collections, data.places, data.tracks, filter],
+    [data.collections, data.places, data.tracks, filter, view],
   );
   const viewSource = useMemo(
     () => libraryTracks(data.tracks, view === 'activities' ? 'activities' : 'courses', null, null),
@@ -247,8 +265,24 @@ export function Sidebar({
   );
   const viewTracks = useMemo(
     () =>
-      libraryTracks(filtered.tracks, view === 'activities' ? 'activities' : 'courses', sport, year),
-    [filtered.tracks, view, sport, year],
+      libraryTracks(
+        filtered.tracks,
+        view === 'activities' ? 'activities' : 'courses',
+        sport,
+        year,
+        trackSort,
+      ),
+    [filtered.tracks, view, sport, year, trackSort],
+  );
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (bodyRef.current) bodyRef.current.scrollTop = 0;
+    setPlaceLimit(40);
+    setTrackLimit(30);
+  }, [view, filter, sport, year, placeSort, trackSort]);
+  const sortedPlaces = useMemo(
+    () => libraryPlaces(filtered.places, data.collections, placeSort),
+    [filtered.places, data.collections, placeSort],
   );
   const sports = useMemo(() => librarySports(viewSource), [viewSource]);
   // A listed track the map does not draw, by its own eye or a hidden folder above it.
@@ -309,6 +343,8 @@ export function Sidebar({
     // to show, so revealing clears it — the request is more specific than it is.
     setFilter('');
     setView('folders');
+    setPlaceLimit(data.places.length);
+    setTrackLimit(data.tracks.length);
     const parentId = 'parentId' in item ? item.parentId : item.collectionId;
     const ancestors = ancestorFolderIds(tree, parentId);
     setExpandedFolders((current) => {
@@ -333,13 +369,20 @@ export function Sidebar({
   }, [highlighted]);
 
   const toggleExpanded = (key: string) => setExpanded((cur) => (cur === key ? null : key));
-  const toggleFolder = (id: string) =>
+  const toggleFolder = (id: string) => {
+    if (filtered.active) {
+      setFilter('');
+      setView('folders');
+      setExpandedFolders((current) => new Set([...current, ...ancestorFolderIds(tree, id)]));
+      return;
+    }
     setExpandedFolders((current) => {
       const next = new Set(current);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
+  };
 
   /**
    * Start naming a new folder. Creating inside a collapsed folder has to expand
@@ -423,7 +466,7 @@ export function Sidebar({
         // Only the row being revealed takes the ref; the effect scrolls to
         // whatever it finds attached.
         ref={revealItem?.kind === 'place' && place.id === revealItem.id ? revealRowRef : undefined}
-        className={`item-row${place.visible ? '' : ' hidden'}${key === highlighted ? ' revealed' : ''}`}
+        className={`item-row${key === highlighted ? ' revealed' : ''}`}
       >
         <div
           className={`item-line${dropClass(key)}${drag?.id === place.id ? ' dragging' : ''}`}
@@ -435,12 +478,24 @@ export function Sidebar({
             (zone) => dropOnPlace(place, zone),
           )}
         >
-          <span className="row-indent" aria-hidden="true" />
+          {reordering && (
+            <span className="reorder-grip" aria-label="Drag to reorder">
+              ⠿
+            </span>
+          )}
           <span className="item-icon place-icon" style={{ color: place.color }} title={place.name}>
             {place.icon}
           </span>
-          <button type="button" className="item-name" onClick={() => onShowPlace(place)}>
-            {place.name}
+          <button
+            type="button"
+            className="item-name"
+            aria-label={libraryPlaceName(place)}
+            aria-description={`${libraryPlaceLine(place, data.collections)}. ${libraryVisibility(place, data.collections)}`}
+            onClick={() => onShowPlace(place)}
+          >
+            {libraryPlaceName(place)}
+            <span className="item-context">{libraryPlaceLine(place, data.collections)}</span>
+            <span className="item-map-state">{libraryVisibility(place, data.collections)}</span>
           </button>
           <span className="row-actions">
             {/* Straight into the planner, as on Android. Without it the same
@@ -454,15 +509,21 @@ export function Sidebar({
             >
               Go
             </button>
-            <button
-              type="button"
-              className="icon-button"
-              aria-label={`Edit ${place.name}`}
-              aria-expanded={expanded === key}
-              onClick={() => toggleExpanded(key)}
-            >
-              ✎
-            </button>
+            <CollectionMenu title={place.name}>
+              <button
+                type="button"
+                aria-label={`Edit ${place.name}`}
+                onClick={() => toggleExpanded(key)}
+              >
+                Edit place
+              </button>
+              <button
+                type="button"
+                onClick={() => void data.updatePlace(place.id, { tags: quickAccessTags(place) })}
+              >
+                {isQuickAccess(place) ? 'Remove from Quick access' : 'Pin to Quick access'}
+              </button>
+            </CollectionMenu>
           </span>
           <button
             type="button"
@@ -472,10 +533,10 @@ export function Sidebar({
             aria-pressed={place.visible}
             onClick={() => void data.updatePlace(place.id, { visible: !place.visible })}
           >
-            <EyeIcon off={!place.visible} size={18} />
+            <EyeIcon off={libraryVisibility(place, data.collections) !== 'On map'} size={18} />
           </button>
         </div>
-        <TagChips tags={place.tags} onPick={setFilter} />
+        <TagChips tags={place.tags.filter((tag) => tag !== 'quick-access')} onPick={setFilter} />
         {expanded === key && (
           <ItemEditor
             name={place.name}
@@ -502,8 +563,6 @@ export function Sidebar({
 
   const trackRow = (track: TrackRecord) => {
     const key = `track:${track.id}`;
-    const kind = libraryTrackKind(track);
-    const date = activityDate(track);
     return (
       <li
         key={key}
@@ -513,10 +572,18 @@ export function Sidebar({
         <div className="item-line">
           <span className="row-indent" aria-hidden="true" />
           <span className="item-icon track-icon" aria-hidden="true">
-            〰
+            {garminSportIcon(libraryTrackSport(track))}
           </span>
-          <button type="button" className="item-name" onClick={() => onShowTrack(track)}>
+          <button
+            type="button"
+            className="item-name"
+            aria-label={track.name}
+            aria-description={`${libraryTrackLine(track)}. ${libraryVisibility(track, data.collections)}`}
+            onClick={() => onShowTrack(track)}
+          >
             {track.name}
+            <span className="item-context">{libraryTrackLine(track)}</span>
+            <span className="item-map-state">{libraryVisibility(track, data.collections)}</span>
           </button>
           <span className="row-actions">
             <button
@@ -537,20 +604,10 @@ export function Sidebar({
             aria-pressed={track.visible}
             onClick={() => void data.updateTrack(track.id, { visible: !track.visible })}
           >
-            <EyeIcon off={!track.visible} size={18} />
+            <EyeIcon off={libraryVisibility(track, data.collections) !== 'On map'} size={18} />
           </button>
         </div>
-        <div className="item-tags">
-          {kind === 'course'
-            ? 'Garmin Connect + Atlas copy · '
-            : kind === 'activity'
-              ? 'Garmin recording · Atlas copy · '
-              : 'Atlas · '}
-          {libraryTrackSport(track) ? `${libraryTrackSport(track)} · ` : ''}
-          {date ? `${date} · ` : ''}
-          {trackSummary(track.stats)}
-        </div>
-        <TagChips tags={track.tags} onPick={setFilter} />
+        <TagChips tags={libraryTrackTags(track)} onPick={setFilter} />
         {expanded === key && (
           <ItemEditor
             name={track.name}
@@ -645,7 +702,7 @@ export function Sidebar({
                   ? revealRowRef
                   : undefined
               }
-              className={`folder-row${folder.visible ? '' : ' hidden'}${`folder:${folder.id}` === highlighted ? ' revealed' : ''}`}
+              className={`folder-row${`folder:${folder.id}` === highlighted ? ' revealed' : ''}`}
             >
               <div
                 className={`item-line${dropClass(`folder:${folder.id}`)}${drag?.id === folder.id ? ' dragging' : ''}`}
@@ -658,6 +715,11 @@ export function Sidebar({
                   drag?.kind === 'place' ? 'inside' : 'all',
                 )}
               >
+                {reordering && (
+                  <span className="reorder-grip" aria-label="Drag to reorder">
+                    ⠿
+                  </span>
+                )}
                 <button
                   type="button"
                   className="icon-button folder-toggle"
@@ -692,7 +754,7 @@ export function Sidebar({
                     {folder.name}
                   </button>
                 )}
-                <span className="row-actions">
+                <CollectionMenu title={folder.name}>
                   {folder.parentId !== null && (
                     <button
                       type="button"
@@ -701,7 +763,7 @@ export function Sidebar({
                       title="Move up one level"
                       onClick={() => moveCollectionUp(folder)}
                     >
-                      ↑
+                      Move up one level
                     </button>
                   )}
                   <button
@@ -711,7 +773,7 @@ export function Sidebar({
                     title="New subfolder"
                     onClick={() => startCreating(folder.id)}
                   >
-                    +
+                    New subfolder
                   </button>
                   <button
                     type="button"
@@ -719,7 +781,7 @@ export function Sidebar({
                     aria-label={`Rename ${folder.name}`}
                     onClick={() => setRenaming(folder.id)}
                   >
-                    ✎
+                    Rename
                   </button>
                   <button
                     type="button"
@@ -735,86 +797,161 @@ export function Sidebar({
                       })
                     }
                   >
-                    ✕
+                    Delete folder…
                   </button>
-                </span>
-                <PinLabelToggle
-                  on={folderHasPinLabels(pinLabels.prefs, folder.id)}
-                  what={folder.name}
-                  onToggle={() => void pinLabels.toggleFolder(folder.id)}
-                />
-                <button
-                  type="button"
-                  className="icon-button visibility-toggle"
-                  title={folder.visible ? 'Hide collection from map' : 'Show collection on map'}
-                  aria-label={`${folder.visible ? 'Hide' : 'Show'} collection ${folder.name} ${folder.visible ? 'from' : 'on'} map`}
-                  aria-pressed={folder.visible}
-                  onClick={() => void data.setCollectionVisible(folder.id, !folder.visible)}
-                >
-                  <EyeIcon off={!folder.visible} size={18} />
-                </button>
+                  <button
+                    type="button"
+                    aria-label={`Names of ${folder.name} on the map`}
+                    aria-pressed={folderHasPinLabels(pinLabels.prefs, folder.id)}
+                    onClick={() => void pinLabels.toggleFolder(folder.id)}
+                  >
+                    <PinLabelIcon size={18} />
+                    Show labels
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-button visibility-toggle"
+                    title={folder.visible ? 'Hide collection from map' : 'Show collection on map'}
+                    aria-label={`${folder.visible ? 'Hide' : 'Show'} collection ${folder.name} ${folder.visible ? 'from' : 'on'} map`}
+                    aria-pressed={folder.visible}
+                    onClick={() => void data.setCollectionVisible(folder.id, !folder.visible)}
+                  >
+                    <EyeIcon off={!folder.visible} size={18} /> Show on map
+                  </button>
+                </CollectionMenu>
+              </div>
+              <div className="folder-context">
+                {libraryVisibility(
+                  { visible: folder.visible, collectionId: folder.parentId },
+                  data.collections,
+                )}
               </div>
               {open && branch(folder.id, depth + 1)}
             </li>
           );
         })}
-        {places.map(placeRow)}
-        {tracks.map(trackRow)}
+        {places.slice(0, placeLimit).map(placeRow)}
+        {places.length > placeLimit && (
+          <li>
+            <button type="button" onClick={() => setPlaceLimit((limit) => limit + 40)}>
+              Show more places ({places.length - placeLimit} remaining)
+            </button>
+          </li>
+        )}
+        {tracks.slice(0, trackLimit).map(trackRow)}
+        {tracks.length > trackLimit && (
+          <li>
+            <button type="button" onClick={() => setTrackLimit((limit) => limit + 30)}>
+              Show more tracks ({tracks.length - trackLimit} remaining)
+            </button>
+          </li>
+        )}
       </ul>
     );
   };
+
+  const renderQuickAccess = () => (
+    <div className="quick-access">
+      <h4>Quick access</h4>
+      {data.places.some(isQuickAccess) ? (
+        <ul className="item-list">
+          {data.places.filter(isQuickAccess).map((place) => (
+            <li className="item-line" key={`quick:${place.id}`}>
+              <button
+                type="button"
+                className="item-name"
+                aria-label={libraryPlaceName(place)}
+                onClick={() => onShowPlace(place)}
+              >
+                {place.icon} {libraryPlaceName(place)}
+              </button>
+              <CollectionMenu title={`Quick access ${libraryPlaceName(place)}`}>
+                <button
+                  type="button"
+                  onClick={() => void data.updatePlace(place.id, { tags: quickAccessTags(place) })}
+                >
+                  Remove from Quick access
+                </button>
+              </CollectionMenu>
+              <button
+                type="button"
+                className="row-go"
+                aria-label={`Quick directions to ${place.name}`}
+                onClick={() => onGoToPlace(place)}
+              >
+                Go
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="settings-note">Pin Home, Work or any place here from its ⋯ menu.</p>
+      )}
+    </div>
+  );
 
   return (
     <aside className="sidebar" aria-label="Collections">
       <div className="sidebar-header">
         <strong>Collections</strong>
         <div className="sidebar-actions">
-          <button
-            type="button"
-            onClick={() => setImportOpen((open) => !open)}
-            disabled={importing || data.status !== 'ready'}
-            title="Import GPX/KML/KMZ into a folder, or restore an Atlas backup (.json/.zip)"
-            aria-expanded={importOpen}
-          >
-            {importing ? 'Importing…' : 'Import'}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setInaturOpen((open) => !open);
-              setInaturError(null);
-            }}
-            disabled={data.status !== 'ready'}
-            title="Turn an iNatur hunting/fishing permit into a saved area (paste its offer link)"
-            aria-expanded={inaturOpen}
-          >
-            iNatur permit
-          </button>
-          <button
-            type="button"
-            onClick={() => void data.exportAll()}
-            disabled={data.status !== 'ready'}
-          >
-            Export all
-          </button>
-          {/* Routes & courses and Activities have their own, for what they list. */}
-          {view !== 'courses' && view !== 'activities' && (
+          <CollectionMenu title="Collections">
             <button
               type="button"
-              onClick={() => void data.setAllVisible(anyHidden)}
-              disabled={data.status !== 'ready' || !hasItems}
-              title={anyHidden ? 'Show everything on the map' : 'Hide everything from the map'}
+              onClick={() => setImportOpen((open) => !open)}
+              disabled={importing || data.status !== 'ready'}
+              title="Import GPX/KML/KMZ into a folder, or restore an Atlas backup (.json/.zip)"
+              aria-expanded={importOpen}
             >
-              {anyHidden ? 'Show all' : 'Hide all'}
+              {importing ? 'Importing…' : 'Import'}
             </button>
-          )}
-          <button
-            type="button"
-            onClick={() => startCreating(null)}
-            disabled={data.status !== 'ready'}
-          >
-            New folder
-          </button>
+            <button
+              type="button"
+              onClick={() => {
+                setInaturOpen((open) => !open);
+                setInaturError(null);
+              }}
+              disabled={data.status !== 'ready'}
+              title="Turn an iNatur hunting/fishing permit into a saved area (paste its offer link)"
+              aria-expanded={inaturOpen}
+            >
+              iNatur permit
+            </button>
+            <button
+              type="button"
+              onClick={() => void data.exportAll()}
+              disabled={data.status !== 'ready'}
+            >
+              Export all
+            </button>
+            {/* Routes & courses and Activities have their own, for what they list. */}
+            {view !== 'courses' && view !== 'activities' && (
+              <button
+                type="button"
+                onClick={() => void data.setAllVisible(anyHidden)}
+                disabled={data.status !== 'ready' || !hasItems}
+                title={anyHidden ? 'Show everything on the map' : 'Hide everything from the map'}
+              >
+                {anyHidden ? 'Show all' : 'Hide all'}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => startCreating(null)}
+              disabled={data.status !== 'ready'}
+            >
+              New folder
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setView('folders');
+                setReordering((value) => !value);
+              }}
+            >
+              {reordering ? 'Done reordering' : 'Reorder'}
+            </button>
+          </CollectionMenu>
           <button type="button" className="icon-button" onClick={onClose} aria-label="Close panel">
             ✕
           </button>
@@ -827,46 +964,52 @@ export function Sidebar({
           hidden
           onChange={(e) => void onImportFiles(e.target.files)}
         />
-        <div className="sidebar-filter">
-          <input
-            type="search"
-            value={filter}
-            onChange={(event) => setFilter(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') {
-                event.preventDefault();
-                setFilter('');
+        {(view === 'folders' || view === 'places' || viewSource.length > 0) && (
+          <div className="sidebar-filter">
+            <input
+              type="search"
+              value={filter}
+              onChange={(event) => setFilter(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  setFilter('');
+                }
+              }}
+              placeholder={
+                view === 'folders' || view === 'places'
+                  ? 'Search folders and places'
+                  : 'Search name, #tag or notes'
               }
-            }}
-            placeholder="Filter by name, #tag or notes"
-            aria-label="Filter collections"
-          />
-          {filterTag !== null && (
-            <PinLabelToggle
-              on={tagHasPinLabels(pinLabels.prefs, filterTag)}
-              what={`#${filterTag}`}
-              onToggle={() => void pinLabels.toggleTag(filterTag)}
+              aria-label="Filter collections"
             />
-          )}
-          {filtered.active && (
-            <button
-              type="button"
-              className="icon-button"
-              aria-label="Clear filter"
-              onClick={() => setFilter('')}
-            >
-              ✕
-            </button>
-          )}
-        </div>
+            {filterTag !== null && (
+              <PinLabelToggle
+                on={tagHasPinLabels(pinLabels.prefs, filterTag)}
+                what={`#${filterTag}`}
+                onToggle={() => void pinLabels.toggleTag(filterTag)}
+              />
+            )}
+            {filtered.active && (
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Clear filter"
+                onClick={() => setFilter('')}
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        )}
         <div className="library-tabs" role="tablist" aria-label="Collections view">
-          {(['folders', 'places', 'courses', 'activities'] as const).map((item) => (
+          {(['folders', 'courses', 'activities'] as const).map((item) => (
             <button
               key={item}
               type="button"
               role="tab"
-              aria-selected={view === item}
-              className={`route-chip${view === item ? ' active' : ''}`}
+              aria-selected={view === item || (item === 'folders' && view === 'places')}
+              className={`route-chip${view === item || (item === 'folders' && view === 'places') ? ' active' : ''}`}
               onClick={() => {
                 setView(item);
                 setSport(null);
@@ -875,17 +1018,72 @@ export function Sidebar({
             >
               {
                 {
-                  folders: 'Folders',
+                  folders: 'Places',
                   places: 'Places',
-                  courses: 'Routes & courses',
+                  courses: 'Routes',
                   activities: 'Activities',
                 }[item]
               }
             </button>
           ))}
         </div>
-        {(view === 'courses' || view === 'activities') && (
+        {(view === 'folders' || view === 'places') && (
+          <div className="places-navigation">
+            <button
+              type="button"
+              className={`route-chip${view === 'folders' ? ' active' : ''}`}
+              aria-pressed={view === 'folders'}
+              onClick={() => setView('folders')}
+            >
+              Folders
+            </button>
+            <button
+              type="button"
+              className={`route-chip${view === 'places' ? ' active' : ''}`}
+              aria-pressed={view === 'places'}
+              onClick={() => setView('places')}
+            >
+              All places
+            </button>
+            {view === 'places' && (
+              <label>
+                Sort{' '}
+                <select
+                  aria-label="Sort places"
+                  value={placeSort}
+                  onChange={(event) => setPlaceSort(event.target.value as LibraryPlaceSort)}
+                >
+                  <option value="name">Name</option>
+                  <option value="recent">Recently added</option>
+                  <option value="folder">Folder</option>
+                </select>
+              </label>
+            )}
+          </div>
+        )}
+        {reordering && (
+          <div className="places-navigation">
+            <span>Drag a row to reorder or move it into a folder.</span>
+            <button type="button" onClick={() => setReordering(false)}>
+              Done
+            </button>
+          </div>
+        )}
+        {(view === 'courses' || view === 'activities') && viewSource.length > 0 && (
           <div className="library-filters">
+            <label>
+              Sort{' '}
+              <select
+                aria-label="Sort tracks"
+                value={trackSort}
+                onChange={(event) => setTrackSort(event.target.value as LibraryTrackSort)}
+              >
+                <option value="newest">Newest first</option>
+                <option value="oldest">Oldest first</option>
+                <option value="name">Name</option>
+                <option value="distance">Longest first</option>
+              </select>
+            </label>
             <label>
               Sport
               <select
@@ -942,7 +1140,7 @@ export function Sidebar({
                 title="Show the listed tracks and hide every other track"
                 onClick={() => void data.showOnlyTracks(viewTracks.map((track) => track.id))}
               >
-                Show only these
+                Show filtered on map
               </button>
             </div>
           </div>
@@ -1054,7 +1252,7 @@ export function Sidebar({
           ))}
         </div>
       )}
-      <div className="sidebar-body">
+      <div className="sidebar-body" ref={bodyRef}>
         {data.status === 'loading' && <p className="sidebar-empty">Opening your data…</p>}
         {data.status === 'error' && (
           <p className="sidebar-empty">
@@ -1063,15 +1261,14 @@ export function Sidebar({
           </p>
         )}
         {data.status === 'ready' &&
-          (view === 'folders' ? (
-            branch(null, 0)
+          (view === 'folders' || (view === 'places' && filtered.active) ? (
+            <>
+              {!filtered.active && renderQuickAccess()}
+              {branch(null, 0)}
+            </>
           ) : (
             <>
-              {view === 'places' && (
-                <p className="settings-note">
-                  Atlas saved places. Garmin saved locations are not imported.
-                </p>
-              )}
+              {view === 'places' && !filtered.active && renderQuickAccess()}
               {view === 'activities' && garmin.connected && (
                 <div className="garmin-courses-head">
                   <h4>From Garmin Connect</h4>
@@ -1098,18 +1295,51 @@ export function Sidebar({
                 </div>
               )}
               <ul className="item-list">
-                {view === 'places' ? filtered.places.map(placeRow) : viewTracks.map(trackRow)}
+                {view === 'places'
+                  ? sortedPlaces.slice(0, placeLimit).map(placeRow)
+                  : viewTracks.slice(0, trackLimit).map(trackRow)}
               </ul>
+              {view === 'places' && sortedPlaces.length > placeLimit && (
+                <button type="button" onClick={() => setPlaceLimit((limit) => limit + 40)}>
+                  Show more places ({sortedPlaces.length - placeLimit} remaining)
+                </button>
+              )}
+              {view !== 'places' && viewTracks.length > trackLimit && (
+                <button type="button" onClick={() => setTrackLimit((limit) => limit + 30)}>
+                  Show more ({viewTracks.length - trackLimit} remaining)
+                </button>
+              )}
               {(view === 'places' ? filtered.places.length === 0 : viewTracks.length === 0) && (
-                <p className="sidebar-empty">
-                  No{' '}
-                  {view === 'places'
-                    ? 'saved places'
-                    : view === 'courses'
-                      ? 'routes or courses'
-                      : 'activities'}{' '}
-                  match these filters.
-                </p>
+                <div className="sidebar-empty">
+                  {filtered.active || (view !== 'places' && viewSource.length > 0) ? (
+                    <p>Nothing matches these filters.</p>
+                  ) : (
+                    <>
+                      <h4>
+                        {view === 'places'
+                          ? 'Save your first place'
+                          : view === 'courses'
+                            ? 'Your next route starts here'
+                            : 'Your adventures, in one place'}
+                      </h4>
+                      <p>
+                        {view === 'places'
+                          ? 'Save a pin from the map, or import places from a file.'
+                          : view === 'courses'
+                            ? 'Plan a route on the map and save it here, or import a GPX file.'
+                            : 'Import recordings from Garmin Connect or a GPX file.'}
+                      </p>
+                      <button type="button" onClick={() => setImportOpen(true)}>
+                        Import GPX / KML
+                      </button>
+                      {view === 'courses' && (
+                        <button type="button" onClick={onClose}>
+                          Back to map to plan a route
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
               )}
               {view === 'courses' && garmin.connected && (
                 <div className="garmin-library">

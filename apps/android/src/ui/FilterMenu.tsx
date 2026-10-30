@@ -104,6 +104,7 @@ export function FilterMenu<K extends string | number>({
 }
 
 export interface MenuAction {
+  selected?: boolean;
   label: string;
   onPress: () => void;
   danger?: boolean;
@@ -146,19 +147,25 @@ export function ActionMenu({
             <Text style={styles.title} numberOfLines={1}>
               {title}
             </Text>
-            {actions.map((action) => (
-              <Pressable
-                key={action.testID}
-                style={styles.row}
-                onPress={() => {
-                  setOpen(false);
-                  action.onPress();
-                }}
-                testID={action.testID}
-              >
-                <Text style={[styles.rowText, action.danger && styles.danger]}>{action.label}</Text>
-              </Pressable>
-            ))}
+            <ScrollView style={styles.list}>
+              {actions.map((action) => (
+                <Pressable
+                  key={action.testID}
+                  style={styles.row}
+                  onPress={() => {
+                    setOpen(false);
+                    action.onPress();
+                  }}
+                  accessibilityRole={action.selected === undefined ? 'button' : 'checkbox'}
+                  accessibilityState={{ checked: action.selected }}
+                  testID={action.testID}
+                >
+                  <Text style={[styles.rowText, action.danger && styles.danger]}>
+                    {action.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
           </Pressable>
         </Pressable>
       </Modal>
