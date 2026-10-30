@@ -2,6 +2,7 @@ import type { NavController } from '@atlas/app-hooks';
 import {
   bboxOutlinesFeatureCollection,
   exploreResultsFeatureCollection,
+  exploreSpiderLegsFeatureCollection,
   lineStringFeature,
   markerScaleForZoom,
   PIN_LABEL_LAYOUT,
@@ -452,6 +453,14 @@ export function MapScene({
 }: MapSceneProps) {
   const mapViewportRef = useRef<View>(null);
   const exploreSourceRef = useRef<GeoJSONSourceRef>(null);
+  const exploreMarkers = useMemo(
+    () => exploreResultsFeatureCollection(exploreResults),
+    [exploreResults],
+  );
+  const exploreLegs = useMemo(
+    () => exploreSpiderLegsFeatureCollection(exploreResults),
+    [exploreResults],
+  );
   const poiSourceRef = useRef<GeoJSONSourceRef>(null);
   const measureMapViewport = useCallback(() => {
     requestAnimationFrame(() => {
@@ -1558,11 +1567,23 @@ export function MapScene({
             />
           </GeoJSONSource>
         ) : null}
+        {/* Leader lines from spread-apart results, in an unclustered source of their own:
+            a LineString in the clustered one below aborts MapLibre Native. */}
+        {!inPip && exploreResults.length > 0 ? (
+          <GeoJSONSource id="atlas-explore-spider-legs" data={exploreLegs}>
+            <Layer
+              type="line"
+              id="atlas-explore-results-spider-legs"
+              minzoom={17}
+              paint={{ 'line-color': '#64748b', 'line-width': 1.5, 'line-opacity': 0.8 }}
+            />
+          </GeoJSONSource>
+        ) : null}
         {!inPip && exploreResults.length > 0 ? (
           <GeoJSONSource
             ref={exploreSourceRef}
             id="atlas-explore-results"
-            data={exploreResultsFeatureCollection(exploreResults)}
+            data={exploreMarkers}
             cluster
             clusterRadius={32}
             clusterMaxZoom={16}
@@ -1582,13 +1603,6 @@ export function MapScene({
               });
             }}
           >
-            <Layer
-              type="line"
-              id="atlas-explore-results-spider-legs"
-              filter={['==', ['get', 'spiderLeg'], true]}
-              minzoom={17}
-              paint={{ 'line-color': '#64748b', 'line-width': 1.5, 'line-opacity': 0.8 }}
-            />
             <Layer
               type="circle"
               id="atlas-explore-results-cluster"

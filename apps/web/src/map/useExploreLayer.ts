@@ -1,8 +1,14 @@
-import { exploreResultsFeatureCollection, type SearchResult } from '@atlas/core';
+import {
+  exploreResultsFeatureCollection,
+  exploreSpiderLegsFeatureCollection,
+  type SearchResult,
+} from '@atlas/core';
 import type maplibregl from 'maplibre-gl';
 import { useEffect, useMemo, useRef } from 'react';
 
 const SOURCE_ID = 'atlas-explore-results';
+// Leader lines live in an unclustered source of their own: clustering takes points only.
+const LEGS_SOURCE_ID = 'atlas-explore-spider-legs';
 const HALO_ID = 'atlas-explore-results-halo';
 const DISC_ID = 'atlas-explore-results-disc';
 const NUMBER_ID = 'atlas-explore-results-number';
@@ -32,6 +38,15 @@ export function useExploreLayer(
   );
   const dataRef = useRef(data);
   dataRef.current = data;
+  const legs = useMemo(
+    () =>
+      results.length
+        ? (exploreSpiderLegsFeatureCollection(results) as GeoJSON.FeatureCollection)
+        : EMPTY_FC,
+    [results],
+  );
+  const legsRef = useRef(legs);
+  legsRef.current = legs;
 
   useEffect(() => {
     if (!map) return;
@@ -40,6 +55,7 @@ export function useExploreLayer(
       if (!map.getStyle()) return;
       for (const id of ALL_LAYERS) if (map.getLayer(id)) map.removeLayer(id);
       if (map.getSource(SOURCE_ID)) map.removeSource(SOURCE_ID);
+      if (map.getSource(LEGS_SOURCE_ID)) map.removeSource(LEGS_SOURCE_ID);
     };
     if (results.length === 0) {
       removeAll();
@@ -57,13 +73,15 @@ export function useExploreLayer(
           clusterRadius: 32,
           clusterMaxZoom: 16,
         });
+      const legsSource = map.getSource(LEGS_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+      if (legsSource) legsSource.setData(legsRef.current);
+      else map.addSource(LEGS_SOURCE_ID, { type: 'geojson', data: legsRef.current });
       if (map.getLayer(DISC_ID)) return;
       const unclustered: maplibregl.ExpressionSpecification = ['!', ['has', 'point_count']];
       map.addLayer({
         id: SPIDER_LEG_ID,
         type: 'line',
-        source: SOURCE_ID,
-        filter: ['==', ['get', 'spiderLeg'], true],
+        source: LEGS_SOURCE_ID,
         // Clusters form up to clusterMaxZoom; legs only mean something once
         // the points they lead to have separated.
         minzoom: 17,

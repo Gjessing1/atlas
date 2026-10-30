@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   exploreCategoriesForProfile,
   exploreResultsFeatureCollection,
+  exploreSpiderLegsFeatureCollection,
   isExploreCategory,
   rankExploreResults,
   sanitizeExploreShortcuts,
@@ -70,16 +71,20 @@ describe('explore categories', () => {
     expect(collection.features[1]!.geometry.coordinates).toEqual([11.2, 60.1]);
   });
 
-  it('spiderfies tightly overlapping results with leader lines', () => {
-    const collection = exploreResultsFeatureCollection([
+  it('spiderfies tightly overlapping results with leader lines in their own collection', () => {
+    const results = [
       { name: 'One', label: '', position: { lat: 59.9, lng: 10.7 } },
       { name: 'Two', label: '', position: { lat: 59.90002, lng: 10.70002 } },
-    ]);
-    const lines = collection.features.filter((feature) => feature.geometry.type === 'LineString');
-    const points = collection.features.filter((feature) => feature.geometry.type === 'Point');
-    expect(lines).toHaveLength(2);
-    expect(points).toHaveLength(2);
+      { name: 'Far', label: '', position: { lat: 60.2, lng: 11.2 } },
+    ];
+    const points = exploreResultsFeatureCollection(results).features;
+    // The clustered source must hold points only: a LineString there aborts MapLibre Native.
+    expect(points.map((feature) => feature.geometry.type)).toEqual(['Point', 'Point', 'Point']);
     expect(points[0]!.geometry.coordinates).not.toEqual([10.7, 59.9]);
+    expect(points[2]!.geometry.coordinates).toEqual([11.2, 60.2]);
+    const legs = exploreSpiderLegsFeatureCollection(results).features;
+    expect(legs.map((feature) => feature.properties.index)).toEqual([0, 1]);
+    expect(legs[0]!.geometry.coordinates).toEqual([[10.7, 59.9], points[0]!.geometry.coordinates]);
   });
 
   it('keeps only nearby unique results and orders by distance', () => {

@@ -163,13 +163,10 @@ export function exploreCategory(id: ExploreCategoryId): ExploreCategory {
 }
 
 /**
- * Numbered map markers in the exact order used by the Explore result list.
- * Results within a finger-width at close zoom are spread around their shared
- * centre with a short leader line. At ordinary zoom the source's clustering
- * still folds them together; once the final cluster opens, every result has a
- * distinct hit target instead of occupying the same pixels.
+ * Where each Explore result is drawn. Results within a finger-width at close zoom are spread
+ * around their shared centre; every other result stays where it is.
  */
-export function exploreResultsFeatureCollection(results: readonly SearchResult[]) {
+function exploreDisplayPositions(results: readonly SearchResult[]): Map<number, LatLng> {
   const closeGroups: number[][] = [];
   results.forEach((result, index) => {
     const group = closeGroups.find((memberIndexes) =>
@@ -200,33 +197,56 @@ export function exploreResultsFeatureCollection(results: readonly SearchResult[]
       });
     });
   }
+  return displayed;
+}
+
+/**
+ * Numbered map markers in the exact order used by the Explore result list, spread apart where
+ * results overlap (see {@link exploreSpiderLegsFeatureCollection} for their leader lines). At
+ * ordinary zoom the source's clustering still folds them together; once the final cluster
+ * opens, every result has a distinct hit target instead of occupying the same pixels.
+ *
+ * Points only, because this feeds a *clustered* source: MapLibre Native's clustering reads
+ * every feature as a point and aborts the whole app (`bad_variant_access` on a map worker
+ * thread) on a LineString — which is what the leader lines in this collection did whenever two
+ * results sat within 12 m of each other.
+ */
+export function exploreResultsFeatureCollection(results: readonly SearchResult[]) {
+  const displayed = exploreDisplayPositions(results);
   return {
     type: 'FeatureCollection' as const,
-    features: results.flatMap((result, index) => {
+    features: results.map((result, index) => {
       const shown = displayed.get(index) ?? result.position;
-      const point = {
+      return {
         type: 'Feature' as const,
         properties: { index, label: String(index + 1), name: result.name },
+        geometry: { type: 'Point' as const, coordinates: [shown.lng, shown.lat] },
+      };
+    }),
+  };
+}
+
+/**
+ * The leader line from each spread-apart Explore result back to where it really is. Its own,
+ * unclustered source: clustering accepts points only.
+ */
+export function exploreSpiderLegsFeatureCollection(results: readonly SearchResult[]) {
+  const displayed = exploreDisplayPositions(results);
+  return {
+    type: 'FeatureCollection' as const,
+    features: [...displayed].map(([index, shown]) => {
+      const { position } = results[index]!;
+      return {
+        type: 'Feature' as const,
+        properties: { index },
         geometry: {
-          type: 'Point' as const,
-          coordinates: [shown.lng, shown.lat],
+          type: 'LineString' as const,
+          coordinates: [
+            [position.lng, position.lat],
+            [shown.lng, shown.lat],
+          ],
         },
       };
-      if (!displayed.has(index)) return [point];
-      return [
-        {
-          type: 'Feature' as const,
-          properties: { spiderLeg: true },
-          geometry: {
-            type: 'LineString' as const,
-            coordinates: [
-              [result.position.lng, result.position.lat],
-              [shown.lng, shown.lat],
-            ],
-          },
-        },
-        point,
-      ];
     }),
   };
 }
