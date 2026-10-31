@@ -59,6 +59,20 @@ Locator traps (v0.222.0):
   Drive are exactly that (v0.227.0's 3D test); assert what the switch changes instead
   (`style.terrain`, the control's label).
 
+- **Activity profiles are a dropdown since 2026-10-06 (`df662f4`), not a radio row.** Their
+  `radio` rows exist only while the switcher is open, so `getByRole('radio', { name: 'Hike' })`
+  on a closed map waits out the 60 s timeout. Use `pickProfile(page, 'Hike')` from `helpers.ts`.
+  Eight `core.spec.ts` tests sat broken this way until v0.261.0 because nobody ran that spec.
+- **Settings covers the bottom-right control column** (it always has: both are anchored right).
+  A test that needs the profile or layer switcher with a drawer open must use Collections, on the
+  left — a click through Settings fails with "settings-panel subtree intercepts pointer events".
+- **A collapsed track row's actions live in its ⋯ menu** (`More actions for <name>` → the
+  `<name> actions` group), not as buttons on the row.
+
+Known flake: `core.spec.ts` "a freshly launched batch is drawn as a purple train" clicks a
+satellite dot that keeps orbiting between the projection and the click; it failed once mid-suite
+and passed alone on 2026-10-31.
+
 Known flake: `core.spec.ts` "direction-arrow source is selectable and persists" gives the OPFS
 write 250 ms before reloading and can read the old value when it runs mid-suite. It passes on its
 own; re-run it alone before suspecting settings persistence.

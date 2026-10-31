@@ -25,6 +25,25 @@
   --floating-margin: 12px;
   --floating-shadow: 0 4px 16px rgba(28, 39, 51, 0.2);
   --floating-border: 1px solid rgba(52, 64, 79, 0.12);
+  /* Side drawers (Collections left, Settings right, Explore left) and the
+     quick switchers that float above their buttons share one geometry: the
+     same inset from the map edge, top below the topbar, radius, shadow and
+     header height, so opening one never looks like a different app. */
+  --panel-top: 60px;
+  --panel-inset: var(--floating-margin);
+  --panel-width: 360px;
+  --panel-wide-width: 680px;
+  --panel-radius: var(--floating-radius);
+  --panel-shadow: 0 10px 30px rgba(28, 39, 51, 0.18), 0 1px 3px rgba(28, 39, 51, 0.12);
+  --panel-header-height: 52px;
+  --panel-pad: 14px;
+  /* Map controls: one size, one plate. */
+  --control-size: 40px;
+  --control-radius: 10px;
+  --control-shadow: 0 1px 4px rgba(28, 39, 51, 0.22), 0 0 0 1px rgba(52, 64, 79, 0.06);
+  --cluster-gap: 12px;
+  --tooltip-bg: #1f262c;
+  --tooltip-text: #fff;
   /* The two colours the map paints a fresh launch train in. Light mode reads
      the dim one and dark mode the bright one, so the card's chip is legible
      against its surface while still being, literally, one of the dots'
@@ -52,6 +71,10 @@
   --success: #7fd49a;
   --info: #83b8ff;
   --route: #b69aff;
+  --panel-shadow: 0 10px 30px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.35);
+  --control-shadow: 0 1px 4px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --tooltip-bg: #eef2f5;
+  --tooltip-text: #1f262c;
   --train: #c084fc;
   --train-tint: rgba(192, 132, 252, 0.14);
   --train-edge: rgba(192, 132, 252, 0.4);
@@ -1291,15 +1314,16 @@ button {
 
 .sidebar {
   position: absolute;
-  top: 60px;
-  left: 12px;
-  bottom: 12px;
-  width: min(340px, calc(100vw - 24px));
+  top: var(--panel-top);
+  left: var(--panel-inset);
+  bottom: var(--panel-inset);
+  width: min(var(--panel-width), calc(100vw - 2 * var(--panel-inset)));
   display: flex;
   flex-direction: column;
   background: var(--surface);
-  border-radius: 10px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  border: var(--floating-border);
+  border-radius: var(--panel-radius);
+  box-shadow: var(--panel-shadow);
   overflow: hidden;
 }
 
@@ -3153,119 +3177,161 @@ button.transit-notice-summary {
 
 .map-control-grid {
   position: absolute;
-  right: 12px;
+  right: var(--floating-margin);
   bottom: 32px;
-  display: grid;
-  grid-template-areas:
-    'quarry quarry'
-    'filters filters'
-    'profiles layers'
-    'terrain measure'
-    '. follow'
-    'zoom locate';
-  grid-template-columns: minmax(0, auto) 40px;
-  justify-items: end;
-  align-items: end;
-  gap: 6px;
-}
-
-.map-terrain-control {
-  grid-area: terrain;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  width: 52px;
-  height: 40px;
-  padding: 0 5px;
-  border: none;
-  border-radius: 8px;
-  background: var(--surface-overlay);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
-  color: var(--text);
-  cursor: pointer;
-}
-
-.map-terrain-control span {
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: -0.04em;
-}
-
-.map-terrain-control:hover:enabled {
-  background: var(--surface);
-}
-
-.map-terrain-control.on {
-  color: var(--accent);
-}
-
-.map-terrain-control:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.layer-switch {
-  position: relative;
-  grid-area: layers;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 6px;
 }
 
-.layer-switch-toggle {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  width: 40px;
-  height: 40px;
-  justify-content: center;
-  padding: 0;
-  border: none;
-  border-radius: 8px;
-  background: var(--surface-overlay);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
-  font: inherit;
-  font-size: 15px;
-  line-height: 1;
-  color: var(--text);
-  cursor: pointer;
+/* Clusters stand further apart than the controls inside one, so the column
+   reads as modes / tools / navigation rather than eight equal buttons. */
+.map-control-grid > .map-control-group,
+.map-control-utilities {
+  margin-top: calc(var(--cluster-gap) - 6px);
 }
 
-.layer-switch-toggle:hover {
+.map-control-primary {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.map-control-utilities {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+/* Every map control is the same plate: size, radius, shadow, hover, focus. */
+.map-control {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: var(--control-size);
+  height: var(--control-size);
+  padding: 0;
+  border: none;
+  border-radius: var(--control-radius);
+  background: var(--surface-overlay);
+  box-shadow: var(--control-shadow);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background-color 0.12s,
+    color 0.12s;
+}
+
+.map-control:hover:enabled,
+.map-control.open {
   background: var(--surface);
 }
 
-.layer-switch-toggle-on {
-  color: var(--accent);
-  background: var(--surface-overlay);
+.map-control:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
+.map-control.on,
+.map-control[aria-pressed='true'] {
+  color: var(--accent);
+}
+
+.map-control:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Joined controls: one plate, hairline dividers, no gaps. Not overflow-hidden,
+   or the tooltips would be clipped. */
+.map-control-group {
+  display: flex;
+  flex-direction: column;
+  width: var(--control-size);
+  border-radius: var(--control-radius);
+  background: var(--surface-overlay);
+  box-shadow: var(--control-shadow);
+}
+
+.map-control-group > .map-control {
+  width: 100%;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.map-control-group > .map-control:first-child {
+  border-radius: var(--control-radius) var(--control-radius) 0 0;
+}
+
+.map-control-group > .map-control:last-child {
+  border-radius: 0 0 var(--control-radius) var(--control-radius);
+}
+
+.map-control-group > .map-control + .map-control {
+  border-top: 1px solid var(--border);
+}
+
+.map-control-group > .map-control:hover:enabled {
+  background: var(--surface-muted);
+}
+
+.map-zoom-controls > .map-control {
+  font-size: 22px;
+  font-weight: 400;
+}
+
+.map-terrain-control {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.map-follow-control {
+  color: var(--accent);
+}
+
+.layer-switch {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.layer-switch-toggle.layer-switch-toggle-on {
+  color: var(--accent);
+}
+
+/* How many layers are on, as a corner badge so the button stays square. */
 .layer-switch-count {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 1px 5px;
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border: 2px solid var(--surface);
   border-radius: 999px;
   background: var(--accent);
   color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
 }
 
 .layer-switch-menu {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 6px);
   display: flex;
   flex-direction: column;
-  min-width: 190px;
-  max-width: min(260px, calc(100vw - 24px));
-  max-height: min(50vh, 420px);
-  overflow-y: auto;
-  padding: 6px;
-  border: var(--floating-border);
-  border-radius: var(--floating-radius);
-  background: var(--surface-overlay);
-  box-shadow: var(--floating-shadow);
 }
 
 .layer-switch-menu-head {
@@ -3314,32 +3380,13 @@ button.transit-notice-summary {
    every other profile because its catalog has no derived surface to tune. */
 .quarry-switch {
   position: relative;
-  grid-area: quarry;
   display: flex;
   justify-content: flex-end;
 }
 
 .quarry-switch-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   max-width: min(240px, calc(100vw - 24px));
-  min-height: 40px;
-  padding: 0 10px;
-  border: none;
-  border-radius: 8px;
-  background: var(--surface-overlay);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1;
-  color: var(--text);
-  cursor: pointer;
-}
-
-.quarry-switch-toggle:hover {
-  background: var(--surface);
+  padding: 0 12px;
 }
 
 .quarry-switch-toggle-on {
@@ -3353,19 +3400,8 @@ button.transit-notice-summary {
 }
 
 .quarry-switch-menu {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 6px);
   display: flex;
   flex-direction: column;
-  min-width: 200px;
-  max-width: min(280px, calc(100vw - 24px));
-  max-height: min(56vh, 460px);
-  overflow-y: auto;
-  padding: 4px;
-  border-radius: 8px;
-  background: var(--surface-overlay);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.28);
 }
 
 .quarry-switch-group + .quarry-switch-group {
@@ -3435,33 +3471,13 @@ button.transit-notice-summary {
    turns them on, and absent when nothing on the map has a variant to pick. */
 .layer-filters {
   position: relative;
-  grid-area: filters;
   display: flex;
   justify-content: flex-end;
 }
 
 .layer-filters-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   max-width: min(240px, calc(100vw - 24px));
-  min-height: 40px;
-  padding: 0 10px;
-  border: none;
-  border-radius: 8px;
-  background: var(--surface-overlay);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1;
-  color: var(--text);
-  cursor: pointer;
-}
-
-.layer-filters-toggle:hover,
-.layer-filters-toggle-open {
-  background: var(--surface);
+  padding: 0 12px;
 }
 
 /* The trigger reads out the chosen values ("Everything · Severe · Gold"), so
@@ -3474,20 +3490,9 @@ button.transit-notice-summary {
 }
 
 .layer-filters-menu {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 6px);
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-width: 220px;
-  max-width: min(300px, calc(100vw - 24px));
-  max-height: min(56vh, 460px);
-  overflow-y: auto;
-  padding: 6px;
-  border-radius: 8px;
-  background: var(--surface-overlay);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.28);
 }
 
 .layer-filters-group + .layer-filters-group {
@@ -3543,83 +3548,6 @@ button.transit-notice-summary {
   /* Opaque, not `--surface-overlay`: that is 95 % white, and the rows scrolling
      under a sticky footer read straight through it. */
   background: var(--surface);
-}
-
-.map-zoom-controls {
-  grid-area: zoom;
-  display: flex;
-  overflow: hidden;
-  border-radius: 8px;
-  background: var(--surface-overlay);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
-}
-
-.map-zoom-controls button,
-.map-follow-control,
-.map-locate-control {
-  width: 40px;
-  height: 40px;
-  border: none;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  cursor: pointer;
-}
-
-.map-zoom-controls button {
-  font-size: 24px;
-  line-height: 1;
-}
-
-.map-zoom-controls button + button {
-  border-left: 1px solid var(--border);
-}
-
-.map-zoom-controls button:hover,
-.map-follow-control:hover,
-.map-locate-control:hover {
-  background: var(--surface-muted);
-}
-
-.map-locate-control {
-  grid-area: locate;
-  display: grid;
-  place-items: center;
-  border-radius: 8px;
-  background: var(--surface-overlay);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
-}
-
-.map-follow-control {
-  grid-area: follow;
-  display: grid;
-  place-items: center;
-  border-radius: 8px;
-  background: var(--surface-overlay);
-  color: var(--accent);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
-}
-
-.map-measure-control {
-  grid-area: measure;
-  width: 40px;
-  height: 40px;
-  display: grid;
-  place-items: center;
-  border: none;
-  border-radius: 8px;
-  background: var(--surface-overlay);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
-  color: var(--text);
-  cursor: pointer;
-}
-
-.map-measure-control:hover {
-  background: var(--surface-muted);
-}
-
-.map-measure-control.on {
-  color: var(--accent);
 }
 
 /* Radius / measure tool panel — bottom-left, out of the way of the control grid. */
@@ -7084,16 +7012,16 @@ button.transit-notice-summary {
   /* Settings is a deliberate modal surface. Keep it above an active planner
      so its tabs remain usable without discarding the route underneath. */
   z-index: 6;
-  top: 60px;
-  right: 12px;
-  bottom: 12px;
-  width: min(340px, calc(100vw - 24px));
+  top: var(--panel-top);
+  right: var(--panel-inset);
+  bottom: var(--panel-inset);
+  width: min(var(--panel-width), calc(100vw - 2 * var(--panel-inset)));
   display: flex;
   flex-direction: column;
-  gap: 4px;
   background: var(--surface);
-  border-radius: 10px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  border: var(--floating-border);
+  border-radius: var(--panel-radius);
+  box-shadow: var(--panel-shadow);
   overflow: hidden;
 }
 
@@ -7234,7 +7162,8 @@ button.transit-notice-summary {
   margin-bottom: 10px;
 }
 
-.settings-section .layers-section {
+.settings-section .layers-section,
+.settings-group .layers-section {
   margin-top: 0;
   padding-top: 0;
   border-top: none;
@@ -7293,18 +7222,20 @@ button.transit-notice-summary {
 
 .explore-panel {
   position: absolute;
-  top: 60px;
-  left: 12px;
-  width: min(360px, calc(100vw - 24px));
-  max-height: calc(100% - 72px);
+  top: var(--panel-top);
+  left: var(--panel-inset);
+  width: min(var(--panel-width), calc(100vw - 2 * var(--panel-inset)));
+  max-height: calc(100% - var(--panel-top) - var(--panel-inset));
   overflow-y: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 11px 12px;
-  border-radius: 10px;
+  padding: 12px var(--panel-pad);
+  border: var(--floating-border);
+  border-radius: var(--panel-radius);
   background: var(--surface);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--panel-shadow);
 }
 
 .explore-head {
@@ -7835,73 +7766,49 @@ button.transit-notice-summary {
   background: #c7c6c0;
 }
 
-/* Activity switcher — sits directly above the layer quick switch, sharing its
-   right edge and plate styling so the two read as one stack of map controls. */
+/* Activity switcher — beside the Layers button, sharing its plate, height and
+   bottom edge so the two primary modes read as one row. Its menu opens
+   upwards, right-aligned to the trigger and never narrower than it. */
 .profile-switch {
   position: relative;
-  grid-area: profiles;
   display: block;
 }
 
 .profile-switch-trigger {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  min-height: 40px;
-  padding: 0 9px;
-  border: 0;
-  border-radius: 8px;
-  background: var(--surface-overlay);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
-  color: var(--text);
-  font: inherit;
-  cursor: pointer;
+  padding: 0 10px 0 11px;
 }
 
-.profile-switch-trigger span:nth-child(2) {
+.profile-switch-label {
   font-size: 13px;
   font-weight: 600;
 }
 
+.profile-switch-chevron {
+  color: var(--text-muted);
+  transition: transform 0.15s ease;
+}
+
+.profile-switch-trigger.open .profile-switch-chevron {
+  transform: rotate(180deg);
+}
+
 .profile-switch-menu {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 7px);
-  z-index: 10;
-  min-width: 176px;
-  max-height: min(62vh, 480px);
-  overflow-y: auto;
-  padding: 5px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface-overlay);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+  min-width: max(100%, 196px);
 }
 
-.profile-switch-item {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  width: 100%;
-  padding: 9px 10px;
-  border: none;
-  border-radius: 6px;
-  background: none;
-  font: inherit;
-  font-size: 14px;
-  line-height: 1;
-  color: var(--text);
-  cursor: pointer;
-  text-align: left;
+.profile-switch-item svg:first-child {
+  flex: none;
+  color: var(--text-muted);
 }
 
-.profile-switch-item:hover {
-  background: var(--surface-muted);
+.profile-switch-item-on svg:first-child {
+  color: var(--accent);
 }
 
 .profile-switch-item-on {
   background: var(--surface-selected);
   color: var(--accent);
+  font-weight: 600;
 }
 
 .profile-switch-item-on:hover {
@@ -7909,6 +7816,7 @@ button.transit-notice-summary {
 }
 
 .profile-switch-check {
+  flex: none;
   margin-left: auto;
 }
 
@@ -8441,4 +8349,487 @@ button.transit-notice-summary {
 .sidebar .item-name:hover {
   text-decoration: none;
   color: var(--accent);
+}
+
+/* ---- shared floating surfaces: drawers, quick switchers, tooltips ----
+   Collections (left), Settings (right) and Explore (left) are one kind of
+   surface, and the quick switchers that open above their buttons (profile,
+   layers, filters, quarry) are another. Each kind shares its geometry from the
+   tokens in :root, so sizing, padding, shadows, scrolling and closing are
+   decided once here rather than per component. */
+
+/* Drawer headers: one height, one title size, the close button in one place. */
+.sidebar-header,
+.settings-header {
+  min-height: var(--panel-header-height);
+  padding: 10px var(--panel-pad);
+}
+
+.sidebar-header > strong,
+.settings-header > strong {
+  font-size: 16px;
+  font-weight: 650;
+}
+
+/* Drawer bodies scroll on their own and never chain the scroll to the map. */
+.sidebar-body,
+.settings-tab-body {
+  overscroll-behavior: contain;
+}
+
+/* Quick switcher menus: open upwards from their trigger, right-aligned to it. */
+.map-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 10;
+  min-width: 220px;
+  max-width: min(300px, calc(100vw - 24px));
+  max-height: min(60vh, 500px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 6px;
+  border: var(--floating-border);
+  border-radius: var(--panel-radius);
+  background: var(--surface);
+  box-shadow: var(--panel-shadow);
+  animation: popover-in 0.12s ease-out;
+}
+
+@keyframes popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+.map-popover-item,
+.quarry-switch-item,
+.layer-switch-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 36px;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.2;
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.map-popover-item:hover,
+.quarry-switch-item:hover,
+.layer-switch-item:hover {
+  background: var(--surface-muted);
+}
+
+.map-popover-item:focus-visible,
+.quarry-switch-item:focus-visible,
+.layer-switch-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Layer switcher categories: each group is its own block under a heading that
+   stays in view while its rows scroll past, with a rule and air between
+   groups — a flat run of switches with small grey labels read as one list. */
+.layer-switch-group + .layer-switch-group {
+  margin-top: 6px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.layer-switch-heading {
+  position: sticky;
+  /* Sticky offsets count from the scrollport deflated by the menu's 6 px
+     padding; -6 px pins the heading (and the footer below) to the very edge,
+     with no strip for rows to scroll through. */
+  top: -6px;
+  z-index: 1;
+  padding: 8px 10px 4px;
+  background: var(--surface);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.layer-switch-active .layer-switch-heading {
+  color: var(--accent);
+}
+
+/* Above the sticky group headings, with a soft edge saying rows continue
+   underneath. */
+.layer-switch-base {
+  bottom: -6px;
+  z-index: 2;
+  box-shadow: 0 -8px 10px -8px rgba(28, 39, 51, 0.18);
+}
+
+.layer-switch-menu-head {
+  padding: 0 2px 4px 10px;
+  font-size: 14px;
+}
+
+/* Desktop tooltips: quicker and more legible than the browser's title bubble,
+   on hover after a short delay or at once on keyboard focus. Beside the
+   right-hand column they open to the left; under the topbar, below. */
+.has-tip {
+  position: relative;
+}
+
+@media (hover: hover) {
+  .has-tip::after {
+    /* The empty alternative keeps the tip out of the accessibility tree: every
+       control already says the same in its aria-label. Browsers without the
+       `/ alt` syntax drop the second line and use the first. */
+    content: attr(data-tip);
+    content: attr(data-tip) / '';
+    position: absolute;
+    top: 50%;
+    right: calc(100% + 10px);
+    z-index: 30;
+    padding: 6px 9px;
+    border-radius: 7px;
+    background: var(--tooltip-bg);
+    color: var(--tooltip-text);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0;
+    line-height: 1.2;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transform: translate(4px, -50%);
+    transition:
+      opacity 0.12s,
+      transform 0.12s;
+  }
+
+  .has-tip.tip-below::after {
+    top: calc(100% + 8px);
+    right: auto;
+    left: 50%;
+    transform: translate(-50%, -4px);
+  }
+
+  .has-tip:hover::after {
+    opacity: 1;
+    transform: translate(0, -50%);
+    transition-delay: 0.4s;
+  }
+
+  .has-tip:focus-visible::after {
+    opacity: 1;
+    transform: translate(0, -50%);
+  }
+
+  .has-tip.tip-below:hover::after,
+  .has-tip.tip-below:focus-visible::after {
+    transform: translate(-50%, 0);
+  }
+
+  /* A pointer elsewhere in the column outranks the keyboard focus left on a
+     control (after Escape closes its menu): one tooltip at a time. */
+  .map-control-grid:hover .has-tip:focus-visible:not(:hover)::after {
+    opacity: 0;
+  }
+
+  /* An open menu is its own explanation. */
+  .has-tip.open::after,
+  .has-tip[aria-expanded='true']::after {
+    display: none;
+  }
+}
+
+.sidebar-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.sidebar-toggle[aria-expanded='true'],
+.sidebar-toggle[aria-pressed='true'] {
+  color: var(--accent);
+  background: var(--surface);
+}
+
+/* ---- Settings: a page per category ---- */
+.settings-layout {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-tab-body {
+  padding: 0 var(--panel-pad) 18px;
+}
+
+.settings-page-head {
+  padding: 16px 0 6px;
+}
+
+.settings-page-head h2 {
+  font-size: 17px;
+  font-weight: 650;
+}
+
+.settings-page-head p {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Related controls sit together under one heading; groups are divided by a
+   rule, not boxed, so the page stays one calm column. */
+.settings-group {
+  padding: 16px 0;
+  border-top: 1px solid var(--border);
+}
+
+.settings-page-head + .settings-group {
+  border-top: none;
+  padding-top: 8px;
+}
+
+.settings-group-plain {
+  padding-top: 4px;
+}
+
+.settings-group > h3,
+.settings-group .settings-section > h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text);
+}
+
+/* A heading further down a group (the bike route under Public transport). */
+.settings-group > * + h3 {
+  margin-top: 16px;
+}
+
+.settings-group .settings-section {
+  padding: 0;
+  border: none;
+}
+
+.settings-group h4 {
+  margin: 14px 0 4px;
+  font-size: 13px;
+}
+
+.settings-group .settings-note {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.settings-group .style-range {
+  grid-template-columns: 120px 1fr minmax(48px, auto);
+  margin-top: 10px;
+}
+
+.settings-group .style-range output {
+  white-space: nowrap;
+}
+
+.settings-group .theme-option {
+  font-size: 13px;
+}
+
+/* Wide enough for a category list beside the page: Settings becomes a proper
+   two-pane window instead of a tall column with a cramped tab strip. */
+@media (min-width: 1100px) {
+  .settings-panel {
+    width: min(var(--panel-wide-width), calc(100vw - 2 * var(--panel-inset)));
+  }
+
+  .settings-layout {
+    flex-direction: row;
+  }
+
+  .settings-tabs {
+    flex: none;
+    flex-direction: column;
+    gap: 2px;
+    width: 188px;
+    padding: 12px 8px;
+    overflow-x: visible;
+    overflow-y: auto;
+    border-bottom: none;
+    border-right: 1px solid var(--border);
+    background: var(--surface-muted);
+  }
+
+  .settings-tab {
+    flex: none;
+    padding: 9px 12px;
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 13px;
+    text-align: left;
+  }
+
+  .settings-tab:hover {
+    background: var(--surface);
+  }
+
+  .settings-tab-on,
+  .settings-tab-on:hover {
+    background: var(--surface-selected);
+    color: var(--accent);
+  }
+
+  .settings-tab-body {
+    padding: 0 24px 24px;
+  }
+
+  .settings-page-head {
+    padding-top: 20px;
+  }
+
+  .settings-page-head h2 {
+    font-size: 19px;
+  }
+}
+
+/* ---- Collections as a workspace ----
+   Three tiers that must not blur: sections (Quick access, Folders, Not in a
+   folder) are small uppercase labels with a count and a rule above; folders
+   are tinted rows with a turning chevron and a guide line down their contents;
+   places and tracks are plain rows with their own icon. */
+.sidebar-body {
+  padding: 4px 10px 14px;
+}
+
+.sidebar-section-head {
+  gap: 8px;
+  margin: 14px 4px 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.quick-access > .sidebar-section-head {
+  margin-top: 6px;
+  padding-top: 0;
+  border-top: none;
+}
+
+.sidebar-section-head h4,
+.sidebar-section-label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.sidebar-section-head h4 {
+  flex: 1;
+}
+
+.sidebar-section-label {
+  margin: 16px 4px 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.sidebar-section-count {
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--text-muted);
+  opacity: 0.8;
+}
+
+.sidebar-section-action {
+  font-size: 12px;
+}
+
+.item-line {
+  min-height: 34px;
+  padding: 2px 6px;
+}
+
+.item-row > .item-line:hover {
+  background: var(--surface-muted);
+}
+
+.folder-row > .item-line:hover {
+  background: color-mix(in srgb, var(--surface-muted) 70%, var(--border));
+}
+
+.folder-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.folder-chevron {
+  color: var(--text-muted);
+  transform: rotate(90deg);
+  transition: transform 0.15s ease;
+}
+
+.folder-chevron.open {
+  transform: rotate(180deg);
+}
+
+.folder-name {
+  font-size: 14px;
+}
+
+.folder-context {
+  padding: 2px 12px 6px 52px;
+}
+
+.sidebar-filter {
+  position: relative;
+}
+
+.sidebar-filter-icon {
+  position: absolute;
+  top: 50%;
+  left: 11px;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.sidebar-header .sidebar-filter input {
+  padding-left: 34px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-popover {
+    animation: none;
+  }
+
+  .profile-switch-chevron,
+  .folder-chevron {
+    transition: none;
+  }
+}
+
+/* Touch screens zoom with two fingers; the steps would only lengthen the
+   column a phone has least room for. Reset north stays — no gesture says it. */
+@media (max-width: 640px) and (pointer: coarse) {
+  .map-zoom-step {
+    display: none;
+  }
+
+  .map-zoom-controls > .map-control:not(.map-zoom-step) {
+    border-top: none;
+    border-radius: var(--control-radius);
+  }
 }

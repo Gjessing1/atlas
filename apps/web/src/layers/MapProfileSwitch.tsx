@@ -1,6 +1,7 @@
 import type { MapProfile } from '@atlas/core';
-import { useEffect, useRef, useState } from 'react';
-import { mapProfileIcon } from '../icons.js';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { CheckIcon, ChevronIcon, mapProfileIcon } from '../icons.js';
+import { useDismiss } from '../useDismiss.js';
 
 interface MapProfileSwitchProps {
   /** Id of the active profile. */
@@ -24,38 +25,65 @@ export function MapProfileSwitch({ active, profiles, onPick }: MapProfileSwitchP
   const current = profiles.find((profile) => profile.id === active) ?? profiles[0];
   const CurrentIcon = current ? mapProfileIcon(current.id) : null;
 
+  const trigger = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  const close = () => {
+    // Hand focus back to the trigger only when it was inside the menu, so a
+    // click on the map is not followed by the page scrolling to the corner.
+    const hadFocus = menu.current?.contains(document.activeElement) ?? false;
+    setOpen(false);
+    if (hadFocus) trigger.current?.focus();
+  };
+  useDismiss(open, root, close);
+
+  // Opening lands on the current profile, like a native select.
   useEffect(() => {
     if (!open) return;
-    const dismiss = (event: PointerEvent) => {
-      if (!root.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const escape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('pointerdown', dismiss);
-    document.addEventListener('keydown', escape);
-    return () => {
-      document.removeEventListener('pointerdown', dismiss);
-      document.removeEventListener('keydown', escape);
-    };
+    menu.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus();
   }, [open]);
+
+  const onMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const items = [...(menu.current?.querySelectorAll<HTMLButtonElement>('[role="radio"]') ?? [])];
+    const at = items.indexOf(document.activeElement as HTMLButtonElement);
+    const next =
+      event.key === 'ArrowDown'
+        ? (at + 1) % items.length
+        : event.key === 'ArrowUp'
+          ? (at - 1 + items.length) % items.length
+          : event.key === 'Home'
+            ? 0
+            : event.key === 'End'
+              ? items.length - 1
+              : null;
+    if (next === null) return;
+    event.preventDefault();
+    items[next]?.focus();
+  };
 
   return (
     <div className="profile-switch" ref={root}>
       <button
+        ref={trigger}
         type="button"
-        className="profile-switch-trigger"
+        className={`profile-switch-trigger map-control has-tip${open ? ' open' : ''}`}
         aria-label={`Map profile: ${current?.label ?? 'Choose'}`}
         aria-expanded={open}
         aria-haspopup="true"
+        data-tip="Activity profile"
         onClick={() => setOpen((value) => !value)}
       >
-        {CurrentIcon && <CurrentIcon size={21} />}
-        <span>{current?.label}</span>
-        <span aria-hidden="true">⌃</span>
+        {CurrentIcon && <CurrentIcon size={20} />}
+        <span className="profile-switch-label">{current?.label}</span>
+        <ChevronIcon className="profile-switch-chevron" size={16} />
       </button>
       {open && (
-        <div className="profile-switch-menu" role="radiogroup" aria-label="Map profile">
+        <div
+          ref={menu}
+          className="profile-switch-menu map-popover"
+          role="radiogroup"
+          aria-label="Map profile"
+          onKeyDown={onMenuKeyDown}
+        >
           {profiles.map((profile) => {
             const selected = profile.id === active;
             const Icon = mapProfileIcon(profile.id);
@@ -65,15 +93,16 @@ export function MapProfileSwitch({ active, profiles, onPick }: MapProfileSwitchP
                 type="button"
                 role="radio"
                 aria-checked={selected}
-                className={`profile-switch-item${selected ? ' profile-switch-item-on' : ''}`}
+                tabIndex={selected ? 0 : -1}
+                className={`profile-switch-item map-popover-item${selected ? ' profile-switch-item-on' : ''}`}
                 onClick={() => {
                   onPick(profile.id);
-                  setOpen(false);
+                  close();
                 }}
               >
-                <Icon size={21} />
+                <Icon size={20} />
                 <span>{profile.label}</span>
-                {selected && <span className="profile-switch-check">✓</span>}
+                {selected && <CheckIcon className="profile-switch-check" size={18} />}
               </button>
             );
           })}

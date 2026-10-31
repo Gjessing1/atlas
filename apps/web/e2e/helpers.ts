@@ -32,6 +32,15 @@ export async function project(page: Page, lat: number, lng: number): Promise<[nu
   );
 }
 
+/** Switch activity profile the way a user does: open the switcher, pick a row. */
+export async function pickProfile(page: Page, label: string): Promise<void> {
+  await page.getByRole('button', { name: /^Map profile/ }).click();
+  await page
+    .getByRole('radiogroup', { name: 'Map profile' })
+    .getByRole('radio', { name: label, exact: true })
+    .click();
+}
+
 /** Open route planning through the user-facing map-pin → Directions flow. */
 export async function openRoutePlannerAt(page: Page, lat: number, lng: number): Promise<void> {
   const [x, y] = await project(page, lat, lng);

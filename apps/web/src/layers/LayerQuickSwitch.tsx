@@ -1,7 +1,8 @@
 import { groupLayerCatalog, searchLayerGroups, type LayerMeta } from '@atlas/core';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { LayersIcon } from '../icons.js';
+import { useMemo, useRef, useState } from 'react';
+import { LayersIcon, SearchIcon } from '../icons.js';
 import type { LayerCatalog } from './useLayerCatalog.js';
+import { useDismiss } from '../useDismiss.js';
 
 interface LayerQuickSwitchProps {
   layers: LayerCatalog;
@@ -43,22 +44,7 @@ export function LayerQuickSwitch({ layers, mapZoom }: LayerQuickSwitchProps) {
   const [query, setQuery] = useState('');
   const rootRef = useRef<HTMLDivElement>(null);
 
-  // Dismiss like a menu: click anywhere else, or Escape.
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (e: PointerEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [open]);
+  useDismiss(open, rootRef, () => setOpen(false));
 
   const groups = useMemo(
     () => groupLayerCatalog(layers.catalog, layers.profileId),
@@ -85,7 +71,7 @@ export function LayerQuickSwitch({ layers, mapZoom }: LayerQuickSwitchProps) {
   return (
     <div className="layer-switch" ref={rootRef}>
       {open && (
-        <div className="layer-switch-menu" role="group" aria-label="Map layers">
+        <div className="layer-switch-menu map-popover" role="group" aria-label="Map layers">
           <div className="layer-switch-menu-head">
             <strong>Layers</strong>
             <button
@@ -98,7 +84,7 @@ export function LayerQuickSwitch({ layers, mapZoom }: LayerQuickSwitchProps) {
                 if (searchOpen) setQuery('');
               }}
             >
-              ⌕
+              <SearchIcon size={18} />
             </button>
           </div>
           {searchOpen && (
@@ -199,10 +185,10 @@ export function LayerQuickSwitch({ layers, mapZoom }: LayerQuickSwitchProps) {
       )}
       <button
         type="button"
-        className={`layer-switch-toggle${activeCount > 0 ? ' layer-switch-toggle-on' : ''}`}
+        className={`layer-switch-toggle map-control has-tip${activeCount > 0 ? ' layer-switch-toggle-on' : ''}${open ? ' open' : ''}`}
         aria-expanded={open}
         aria-label={activeCount > 0 ? `Map layers (${activeCount} on)` : 'Map layers'}
-        title="Map layers"
+        data-tip="Map layers"
         onClick={() => setOpen((v) => !v)}
       >
         <LayersIcon size={18} />

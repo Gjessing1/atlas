@@ -36,12 +36,14 @@ import {
 import type { ImportSummary, PlaceRecord, TrackRecord } from '@atlas/storage';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ChevronIcon,
   EyeIcon,
   FolderIcon,
   FolderPlusIcon,
   LayersIcon,
   MapPinIcon,
   PinLabelIcon,
+  SearchIcon,
 } from './icons.js';
 import { CollectionMenu } from './sidebar/CollectionMenu.js';
 import { GarminCourses } from './settings/GarminCourses.js';
@@ -778,7 +780,7 @@ export function Sidebar({
                   aria-expanded={open}
                   onClick={() => toggleFolder(folder.id)}
                 >
-                  {open ? '▾' : '▸'}
+                  <ChevronIcon size={14} className={`folder-chevron${open ? ' open' : ''}`} />
                 </button>
                 <span className="item-icon folder-icon">
                   <FolderIcon open={open} size={16} />
@@ -905,7 +907,10 @@ export function Sidebar({
             </li>
             {places.length + tracks.length > 0 && (
               <li>
-                <h4 className="sidebar-section-label">Not in a folder</h4>
+                <h4 className="sidebar-section-label">
+                  Not in a folder
+                  <span className="sidebar-section-count">{places.length + tracks.length}</span>
+                </h4>
               </li>
             )}
           </>
@@ -1008,7 +1013,21 @@ export function Sidebar({
   /** The Folders heading, with its new-folder button where the mockup puts it. */
   const renderFoldersHead = () => (
     <div className="sidebar-section-head">
-      <h4>Folders</h4>
+      <h4>
+        Folders
+        {data.collections.length > 0 && (
+          <span className="sidebar-section-count">{data.collections.length}</span>
+        )}
+      </h4>
+      {expandedFolders.size > 0 && (
+        <button
+          type="button"
+          className="text-link sidebar-section-action"
+          onClick={() => setExpandedFolders(new Set())}
+        >
+          Collapse all
+        </button>
+      )}
       <button
         type="button"
         className="icon-button"
@@ -1113,6 +1132,7 @@ export function Sidebar({
         </div>
         {(placesTab || viewSource.length > 0) && (
           <div className="sidebar-filter">
+            <SearchIcon size={16} className="sidebar-filter-icon" />
             <input
               type="search"
               value={filter}

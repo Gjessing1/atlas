@@ -21,7 +21,9 @@ test('settings areas own layers and profile layout while map controls stay in on
   await waitForMap(page);
 
   const grid = page.locator('.map-control-grid');
-  await expect(grid).toHaveCSS('display', 'grid');
+  await expect(grid).toHaveCSS('display', 'flex');
+  await expect(grid.getByRole('group', { name: 'Map tools' })).toBeVisible();
+  await expect(grid.getByRole('group', { name: 'My position' })).toBeVisible();
   await expect(grid.getByRole('button', { name: 'Zoom in' })).toBeVisible();
   await expect(grid.getByRole('button', { name: 'Zoom out' })).toBeVisible();
   await expect(grid.getByRole('button', { name: 'Find my location' })).toBeVisible();

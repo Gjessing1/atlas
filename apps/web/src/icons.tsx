@@ -1,18 +1,20 @@
 import type { RouteActionKey, RoutingProfile } from '@atlas/routing';
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 
 export interface IconProps {
   className?: string;
   size?: number;
+  style?: CSSProperties;
 }
 
 type IconComponent = (props: IconProps) => React.ReactElement;
 
-function IconFrame({ children, className, size = 20 }: IconProps & { children: ReactNode }) {
+function IconFrame({ children, className, size = 20, style }: IconProps & { children: ReactNode }) {
   return (
     <svg
       aria-hidden="true"
       className={className}
+      style={style}
       focusable="false"
       width={size}
       height={size}
@@ -677,6 +679,45 @@ export function CheckIcon(props: IconProps) {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
+    </IconFrame>
+  );
+}
+
+/** A compass needle: the filled half points north. */
+export function NorthIcon(props: IconProps) {
+  return (
+    <IconFrame {...props}>
+      <path d="M12 3.5l3.6 8.5h-7.2z" fill="currentColor" />
+      <path
+        d="M8.4 12h7.2L12 20.5z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+    </IconFrame>
+  );
+}
+
+/** Points up by default — the switchers above the map open upwards. */
+export function ChevronIcon(props: IconProps) {
+  return (
+    <IconFrame {...props}>
+      <path
+        d="M7 14.5l5-5 5 5"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </IconFrame>
+  );
+}
+
+export function SearchIcon(props: IconProps) {
+  return (
+    <IconFrame {...props}>
+      <circle cx="10.5" cy="10.5" r="5.5" stroke="currentColor" strokeWidth="1.9" />
+      <path d="M15 15l4.5 4.5" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
     </IconFrame>
   );
 }

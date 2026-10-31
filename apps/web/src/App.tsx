@@ -89,6 +89,7 @@ import {
   CompassIcon,
   CrosshairIcon,
   NavArrowIcon,
+  NorthIcon,
   RulerIcon,
   SettingsIcon,
   StarIcon,
@@ -240,6 +241,17 @@ export function App() {
   // Only set once the user asks to be located; the card shows distances from it.
   const [userAt, setUserAt] = useState<LatLng | null>(null);
   const [map, setMap] = useState<maplibregl.Map | null>(null);
+  // Turns the reset-north needle with the map.
+  const [mapBearing, setMapBearing] = useState(0);
+  useEffect(() => {
+    if (!map) return;
+    const onRotate = () => setMapBearing(map.getBearing());
+    onRotate();
+    map.on('rotate', onRotate);
+    return () => {
+      map.off('rotate', onRotate);
+    };
+  }, [map]);
   const [locateRequest, setLocateRequest] = useState(0);
   // The saved place whose editor is open, and the one the Collections tree
   // should reveal — both by id, so a rename or a delete elsewhere is followed
@@ -279,6 +291,69 @@ export function App() {
   const [exploreSelection, setExploreSelection] = useState<string | null>(null);
   // The two drawers anchored top-left, where the potential bar also lives.
   const leftPanelOpen = sidebarOpen || exploreOpen;
+
+  // Escape closes the open drawer, as the close button does. It waits its turn
+  // behind everything stacked on top: a quick switcher or row menu marks the
+  // key handled, a field keeps Escape for clearing itself, and a modal dialog
+  // or confirmation owns it outright.
+  useEffect(() => {
+    if (!panel) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      const from = event.target instanceof Element ? event.target : null;
+      if (from?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      if (document.querySelector('[aria-modal="true"], [role="alertdialog"]')) return;
+      if (panel === 'explore') {
+        setExploreResults([]);
+        setExploreSelection(null);
+      }
+      setPanel(null);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [panel]);
+
+  // Opening a drawer keeps the map where the user left it — unless the drawer
+  // lands on the selected location, which is then panned sideways into the
+  // middle of the map still in view. Only on opening: what the drawer itself
+  // picks afterwards flies the map on its own terms.
+  const targetRef = useRef(target);
+  targetRef.current = target;
+  useEffect(() => {
+    const at = targetRef.current?.position;
+    if (!map || !panel || !at) return;
+    // Settings is lazy-loaded, so on its first opening the drawer appears a
+    // few frames after the state says it is open; look for it for up to ~1 s.
+    let frame = 0;
+    let tries = 60;
+    const place = () => {
+      const drawer = document.querySelector(
+        panel === 'settings'
+          ? '.settings-panel'
+          : panel === 'collections'
+            ? '.sidebar'
+            : '.explore-panel',
+      );
+      if (!drawer) {
+        if (--tries > 0) frame = requestAnimationFrame(place);
+        return;
+      }
+      const box = drawer.getBoundingClientRect();
+      const view = map.getContainer().getBoundingClientRect();
+      const point = map.project([at.lng, at.lat]);
+      const x = view.left + point.x;
+      const y = view.top + point.y;
+      const clearance = 56;
+      if (y < box.top || y > box.bottom) return;
+      if (x < box.left - clearance || x > box.right + clearance) return;
+      const coversLeft = box.left - view.left < view.right - box.right;
+      const freeFrom = coversLeft ? box.right : view.left;
+      const freeTo = coversLeft ? view.right : box.left;
+      map.panBy([x - (freeFrom + freeTo) / 2, 0]);
+    };
+    frame = requestAnimationFrame(place);
+    return () => cancelAnimationFrame(frame);
+  }, [map, panel]);
   const [selectedTrack, setSelectedTrack] = useState<{
     track: TrackRecord;
     data: TrackData;
@@ -1301,9 +1376,9 @@ export function App() {
         />
         <button
           type="button"
-          className="sidebar-toggle"
+          className="sidebar-toggle has-tip tip-below"
           aria-label="Explore nearby places"
-          title="Explore"
+          data-tip="Explore nearby"
           aria-expanded={exploreOpen}
           onClick={() => {
             if (exploreOpen) setExploreResults([]);
@@ -1318,9 +1393,9 @@ export function App() {
         </button>
         <button
           type="button"
-          className="sidebar-toggle"
+          className="sidebar-toggle has-tip tip-below"
           aria-label="Collections"
-          title="Collections"
+          data-tip="Collections"
           aria-expanded={sidebarOpen}
           onClick={() => togglePanel('collections')}
         >
@@ -1328,9 +1403,9 @@ export function App() {
         </button>
         <button
           type="button"
-          className="sidebar-toggle"
+          className="sidebar-toggle has-tip tip-below"
           aria-label="Weather"
-          title="Weather"
+          data-tip="Weather"
           aria-pressed={weatherTarget !== null}
           onClick={() => {
             // Same corner again: the forecast opens over the drawers, so it
@@ -1343,9 +1418,9 @@ export function App() {
         </button>
         <button
           type="button"
-          className="sidebar-toggle"
+          className="sidebar-toggle has-tip tip-below"
           aria-label="Settings"
-          title="Settings"
+          data-tip="Settings"
           aria-expanded={settingsOpen}
           onClick={toggleSettings}
         >
@@ -1453,9 +1528,13 @@ export function App() {
           onShowAllPois={layers.showAllPoiCategories}
         />
       )}
-      {/* One real grid for all bottom-right map controls. It owns activity,
-          layers, zoom and location so independent absolute offsets cannot
-          overlap as catalogs/profile choices change. */}
+      {/* The bottom-right controls, in three clusters by what they are for.
+          Top: the two primary modes — which activity the map is set up for and
+          what it draws. Middle: the secondary tools (3D terrain, measuring).
+          Bottom, nearest the corner a pointer rests in: the navigation
+          utilities — zoom, orientation and position. One column owns them all
+          so catalog- or profile-dependent rows above (quarry, filters) push
+          the stack up instead of overlapping it. */}
       {nav.phase === 'idle' && (
         <div className={`map-control-grid${mapDockOn ? ' map-control-grid-weather' : ''}`}>
           {/* The Fish & Hunt sub-profile, one row above the layers it tunes.
@@ -1465,76 +1544,88 @@ export function App() {
           {/* What the layers that *are* on are filtered to. Renders nothing
               when none of them has a variant to pick. */}
           <LayerFilterSwitch filters={layerFilters} />
-          <MapProfileSwitch
-            active={profiles.profile.id}
-            profiles={profilePreferences.visibleProfiles}
-            onPick={onPickProfile}
-          />
-          <LayerQuickSwitch layers={layers} mapZoom={mapZoom} />
-          <TerrainControl
-            enabled={terrain3d}
-            basemap={layers.basemapOn}
-            onToggle={() => void terrainPreference.setValue((current) => !current)}
-          />
-          <button
-            type="button"
-            className={`map-measure-control${measure.open ? ' on' : ''}`}
-            aria-label="Measure distance and radius"
-            title="Measure"
-            aria-pressed={measure.open}
-            onClick={measure.toggleOpen}
-          >
-            <RulerIcon size={19} />
-          </button>
-          <div className="map-zoom-controls" role="group" aria-label="Map view">
+          <div className="map-control-primary">
+            <MapProfileSwitch
+              active={profiles.profile.id}
+              profiles={profilePreferences.visibleProfiles}
+              onPick={onPickProfile}
+            />
+            <LayerQuickSwitch layers={layers} mapZoom={mapZoom} />
+          </div>
+          <div className="map-control-group" role="group" aria-label="Map tools">
+            <TerrainControl
+              enabled={terrain3d}
+              basemap={layers.basemapOn}
+              onToggle={() => void terrainPreference.setValue((current) => !current)}
+            />
             <button
               type="button"
-              aria-label="Zoom out"
-              title="Zoom out"
-              onClick={() => map?.zoomOut()}
+              className={`map-measure-control map-control has-tip${measure.open ? ' on' : ''}`}
+              aria-label="Measure distance and radius"
+              data-tip="Measure distance and radius"
+              aria-pressed={measure.open}
+              onClick={measure.toggleOpen}
             >
-              −
-            </button>
-            <button
-              type="button"
-              aria-label="Zoom in"
-              title="Zoom in"
-              onClick={() => map?.zoomIn()}
-            >
-              +
-            </button>
-            <button
-              type="button"
-              aria-label="Reset north"
-              title="Reset north"
-              onClick={() => map?.easeTo({ bearing: 0, pitch: terrain3d ? 55 : 0 })}
-            >
-              <CompassIcon size={18} />
+              <RulerIcon size={19} />
             </button>
           </div>
-          {/* Follow the live position with no destination. It spent a full row
-              inside the route planner until v0.173.0, under the mode icons,
-              where it read as a routing option and pushed the stops down the
-              sheet — but it plans nothing. It belongs beside locate: both are
-              "put the map on me", one once and one continuously. */}
-          <button
-            type="button"
-            className="map-follow-control"
-            aria-label="Follow my position without a destination"
-            title="Follow my position"
-            onClick={onStartExplorer}
-          >
-            <NavArrowIcon size={19} />
-          </button>
-          <button
-            type="button"
-            className="map-locate-control"
-            aria-label="Find my location"
-            title="Find my location"
-            onClick={() => setLocateRequest((request) => request + 1)}
-          >
-            <CrosshairIcon size={19} />
-          </button>
+          <div className="map-control-utilities">
+            <div className="map-control-group map-zoom-controls" role="group" aria-label="Map view">
+              <button
+                type="button"
+                className="map-control map-zoom-step has-tip"
+                aria-label="Zoom in"
+                data-tip="Zoom in"
+                onClick={() => map?.zoomIn()}
+              >
+                +
+              </button>
+              <button
+                type="button"
+                className="map-control map-zoom-step has-tip"
+                aria-label="Zoom out"
+                data-tip="Zoom out"
+                onClick={() => map?.zoomOut()}
+              >
+                −
+              </button>
+              {/* The needle turns with the map, so it says which way is north
+                  before it is clicked. */}
+              <button
+                type="button"
+                className="map-control has-tip"
+                aria-label="Reset north"
+                data-tip={terrain3d ? 'Reset north and tilt' : 'Reset north'}
+                onClick={() => map?.easeTo({ bearing: 0, pitch: terrain3d ? 55 : 0 })}
+              >
+                <NorthIcon size={20} style={{ transform: `rotate(${-mapBearing}deg)` }} />
+              </button>
+            </div>
+            {/* Locate and follow are both "put the map on me" — once, or
+                continuously with no destination. Follow spent a full row inside
+                the route planner until v0.173.0, where it read as a routing
+                option, but it plans nothing. */}
+            <div className="map-control-group" role="group" aria-label="My position">
+              <button
+                type="button"
+                className="map-locate-control map-control has-tip"
+                aria-label="Find my location"
+                data-tip="Find my location"
+                onClick={() => setLocateRequest((request) => request + 1)}
+              >
+                <CrosshairIcon size={19} />
+              </button>
+              <button
+                type="button"
+                className="map-follow-control map-control has-tip"
+                aria-label="Follow my position without a destination"
+                data-tip="Follow my position"
+                onClick={onStartExplorer}
+              >
+                <NavArrowIcon size={19} />
+              </button>
+            </div>
+          </div>
         </div>
       )}
       {map && measure.open && nav.phase === 'idle' && (

@@ -1,6 +1,7 @@
 import type { PotentialTargetSwitch as TargetSwitch } from '@atlas/app-hooks';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { FishHuntIcon } from '../icons.js';
+import { useDismiss } from '../useDismiss.js';
 
 /**
  * The Fish & Hunt sub-profile switcher, sitting directly above the layer quick
@@ -21,23 +22,7 @@ export function PotentialTargetSwitch({ targets }: { targets: TargetSwitch }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  // Dismiss like a menu: click anywhere else, or Escape. Same contract as the
-  // layer quick switch it sits on top of.
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (e: PointerEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [open]);
+  useDismiss(open, rootRef, () => setOpen(false));
 
   // Nothing derived in this profile's catalog — outside Fish & Hunt, or on a
   // server with no derive service. Hidden rather than shown empty.
@@ -48,7 +33,7 @@ export function PotentialTargetSwitch({ targets }: { targets: TargetSwitch }) {
   return (
     <div className="quarry-switch" ref={rootRef}>
       {open && (
-        <div className="quarry-switch-menu" role="group" aria-label="Fish &amp; game">
+        <div className="quarry-switch-menu map-popover" role="group" aria-label="Fish &amp; game">
           {targets.groups.map((group) => (
             <div key={group.layer} className="quarry-switch-group">
               <div className="quarry-switch-group-title">{group.title}</div>
@@ -92,12 +77,12 @@ export function PotentialTargetSwitch({ targets }: { targets: TargetSwitch }) {
       )}
       <button
         type="button"
-        className={`quarry-switch-toggle${active ? ' quarry-switch-toggle-on' : ''}`}
+        className={`quarry-switch-toggle map-control has-tip${active ? ' quarry-switch-toggle-on' : ''}${open ? ' open' : ''}`}
         aria-expanded={open}
         aria-label={
           active ? `Fish & game: ${active.label}, ${active.layerTitle}` : 'Fish & game potential'
         }
-        title={active ? (active.caption ?? active.layerTitle) : 'Pick what you are after'}
+        data-tip={active ? (active.caption ?? active.layerTitle) : 'Pick what you are after'}
         onClick={() => setOpen((v) => !v)}
       >
         <FishHuntIcon size={19} />

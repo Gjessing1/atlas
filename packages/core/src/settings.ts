@@ -32,7 +32,11 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { id: 'layers', label: 'Map layers', hint: 'Overlays drawn on top of the map' },
   { id: 'tiles', label: 'Map tiles', hint: 'Streaming vs. downloaded basemap', androidOnly: true },
   { id: 'profiles', label: 'Activity profiles', hint: 'Switcher activities and their layers' },
-  { id: 'navigation', label: 'Navigation', hint: 'Readouts shown during guidance' },
+  {
+    id: 'navigation',
+    label: 'Navigation',
+    hint: 'Public transport, vehicle and guidance readouts',
+  },
   {
     id: 'offline',
     label: 'Offline regions',

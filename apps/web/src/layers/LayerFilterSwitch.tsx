@@ -1,6 +1,7 @@
 import type { LayerFilterSwitch as FilterSwitch } from '@atlas/app-hooks';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { FilterIcon } from '../icons.js';
+import { useDismiss } from '../useDismiss.js';
 
 /**
  * **What is the map filtered to?** — the chips of the switched-on layers,
@@ -28,23 +29,7 @@ export function LayerFilterSwitch({ filters }: { filters: FilterSwitch }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  // Dismiss like a menu: click anywhere else, or Escape — the same contract as
-  // the layer quick switch and the quarry switch it stacks with.
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (e: PointerEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [open]);
+  useDismiss(open, rootRef, () => setOpen(false));
 
   // Nothing on the map is filterable: hidden rather than shown empty, and
   // decided by the catalog rather than by naming profiles here.
@@ -53,7 +38,7 @@ export function LayerFilterSwitch({ filters }: { filters: FilterSwitch }) {
   return (
     <div className="layer-filters" ref={rootRef}>
       {open && (
-        <div className="layer-filters-menu" role="group" aria-label="Layer filters">
+        <div className="layer-filters-menu map-popover" role="group" aria-label="Layer filters">
           {filters.groups.map((group) => (
             <div key={group.layer} className="layer-filters-group">
               <div className="layer-filters-layer">{group.title}</div>
@@ -92,12 +77,12 @@ export function LayerFilterSwitch({ filters }: { filters: FilterSwitch }) {
       )}
       <button
         type="button"
-        className={`layer-filters-toggle${open ? ' layer-filters-toggle-open' : ''}`}
+        className={`layer-filters-toggle map-control has-tip${open ? ' layer-filters-toggle-open open' : ''}`}
         aria-expanded={open}
         aria-label={
           filters.summary ? `Layer filters: ${filters.summary}` : 'Filter the layers on the map'
         }
-        title={filters.summary ?? 'Filter the layers on the map'}
+        data-tip={filters.summary ?? 'Filter the layers on the map'}
         onClick={() => setOpen((v) => !v)}
       >
         <FilterIcon size={18} />

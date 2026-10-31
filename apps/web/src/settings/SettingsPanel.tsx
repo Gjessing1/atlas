@@ -396,6 +396,8 @@ export function SettingsPanel({
   // Do not wake every upstream status row until the user opens System.
   const status = useStatus('', tab === 'system');
 
+  const current = TABS.find((item) => item.id === tab) ?? TABS[0]!;
+
   return (
     <aside className="settings-panel" aria-label="Settings">
       <div className="settings-header">
@@ -404,291 +406,335 @@ export function SettingsPanel({
           ✕
         </button>
       </div>
-      <div className="settings-tabs" role="tablist" aria-label="Settings areas">
-        {TABS.map((item) => (
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === item.id}
-            className={tab === item.id ? 'settings-tab settings-tab-on' : 'settings-tab'}
-            onClick={() => setTab(item.id)}
-            title={item.hint}
-            key={item.id}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="settings-tab-body">
-        {tab === 'appearance' && (
-          <>
-            <div className="settings-section">
-              <h3>Theme</h3>
-              <div className="theme-options" role="radiogroup" aria-label="Theme">
-                {(['system', 'light', 'dark'] as const).map((mode) => (
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={appearance.mode === mode}
-                    className={
-                      appearance.mode === mode ? 'theme-option theme-option-on' : 'theme-option'
-                    }
-                    onClick={() => appearance.setMode(mode)}
-                    key={mode}
-                  >
-                    {mode[0]!.toUpperCase() + mode.slice(1)}
-                  </button>
-                ))}
-              </div>
-              <p className="settings-note">System follows this device’s light or dark setting.</p>
-              <MapStyleSection editor={mapStyle} />
-            </div>
-          </>
-        )}
-
-        {tab === 'layers' && (
-          <div className="settings-section">
-            <LayersPanel layers={layers} mapZoom={mapZoom} />
-          </div>
-        )}
-
-        {tab === 'profiles' && (
-          <div className="settings-section">
-            <ProfileSettings preferences={profilePreferences} layers={layers} />
-          </div>
-        )}
-
-        {tab === 'navigation' && (
-          <div className="settings-section">
-            <h3>Public transport</h3>
-            <p className="settings-note">
-              How to reach stops and how cautious connections should be.
-            </p>
-            <div
-              className="theme-options"
-              role="radiogroup"
-              aria-label="Access to public transport"
+      {/* A vertical category list beside the page on a desktop-width panel; a
+          scrolling strip above it on a narrow one (CSS decides, same markup). */}
+      <div className="settings-layout">
+        <div
+          className="settings-tabs"
+          role="tablist"
+          aria-label="Settings areas"
+          aria-orientation="vertical"
+        >
+          {TABS.map((item) => (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === item.id}
+              aria-controls="settings-page"
+              className={tab === item.id ? 'settings-tab settings-tab-on' : 'settings-tab'}
+              onClick={() => setTab(item.id)}
+              title={item.hint}
+              key={item.id}
             >
-              {(
-                [
-                  ['foot', 'Walk'],
-                  ['bicycle', 'Own bike'],
-                  ['bike_rental', 'City bike'],
-                ] as const
-              ).map(([mode, label]) => (
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={transitPreferences.value.accessMode === mode}
-                  className={
-                    transitPreferences.value.accessMode === mode
-                      ? 'theme-option theme-option-on'
-                      : 'theme-option'
-                  }
-                  onClick={() => void transitPreferences.patch({ accessMode: mode })}
-                  key={mode}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <label className="style-range">
-              <span>Walking pace</span>
-              <input
-                type="range"
-                min={0.8}
-                max={1.8}
-                step={0.1}
-                value={transitPreferences.value.walkSpeedMps}
-                onChange={(event) =>
-                  void transitPreferences.patch({ walkSpeedMps: Number(event.target.value) })
-                }
-              />
-              <output>{transitPreferences.value.walkSpeedMps.toFixed(1)} m/s</output>
-            </label>
-            <label className="style-range">
-              <span>Transfer buffer</span>
-              <input
-                type="range"
-                min={0}
-                max={600}
-                step={60}
-                value={transitPreferences.value.transferSlackSeconds}
-                onChange={(event) =>
-                  void transitPreferences.patch({
-                    transferSlackSeconds: Number(event.target.value),
-                  })
-                }
-              />
-              <output>{Math.round(transitPreferences.value.transferSlackSeconds / 60)} min</output>
-            </label>
-            <label className="style-range">
-              <span>Walking tolerance</span>
-              <input
-                type="range"
-                min={1}
-                max={10}
-                step={1}
-                value={transitPreferences.value.walkReluctance}
-                onChange={(event) =>
-                  void transitPreferences.patch({ walkReluctance: Number(event.target.value) })
-                }
-              />
-              <output>
-                {transitPreferences.value.walkReluctance <= 2
-                  ? 'Flexible'
-                  : transitPreferences.value.walkReluctance <= 5
-                    ? 'Less walking'
-                    : 'Minimal'}
-              </output>
-            </label>
-            <label className="style-range">
-              <span>Maximum transfers</span>
-              <input
-                type="range"
-                min={0}
-                max={6}
-                step={1}
-                value={transitPreferences.value.maximumTransfers}
-                onChange={(event) =>
-                  void transitPreferences.patch({ maximumTransfers: Number(event.target.value) })
-                }
-              />
-              <output>{transitPreferences.value.maximumTransfers}</output>
-            </label>
-            {transitPreferences.value.accessMode !== 'foot' && (
-              <>
-                <h3>Bicycle route to stops</h3>
+              {item.label}
+            </button>
+          ))}
+        </div>
+
+        <div
+          className="settings-tab-body"
+          id="settings-page"
+          role="tabpanel"
+          aria-label={current.label}
+        >
+          <header className="settings-page-head">
+            <h2>{current.label}</h2>
+            <p>{current.hint}</p>
+          </header>
+          {tab === 'appearance' && (
+            <>
+              <section className="settings-group">
+                <h3>Theme</h3>
+                <div className="theme-options" role="radiogroup" aria-label="Theme">
+                  {(['system', 'light', 'dark'] as const).map((mode) => (
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={appearance.mode === mode}
+                      className={
+                        appearance.mode === mode ? 'theme-option theme-option-on' : 'theme-option'
+                      }
+                      onClick={() => appearance.setMode(mode)}
+                      key={mode}
+                    >
+                      {mode[0]!.toUpperCase() + mode.slice(1)}
+                    </button>
+                  ))}
+                </div>
+                <p className="settings-note">System follows this device’s light or dark setting.</p>
+              </section>
+              <section className="settings-group">
+                <h3>Map colours &amp; labels</h3>
+                <MapStyleSection editor={mapStyle} />
+              </section>
+            </>
+          )}
+
+          {tab === 'layers' && (
+            <section className="settings-group settings-group-plain">
+              <LayersPanel layers={layers} mapZoom={mapZoom} />
+            </section>
+          )}
+
+          {tab === 'profiles' && (
+            <section className="settings-group settings-group-plain">
+              <ProfileSettings preferences={profilePreferences} layers={layers} />
+            </section>
+          )}
+
+          {tab === 'navigation' && (
+            <>
+              <section className="settings-group">
+                <h3>Public transport</h3>
+                <p className="settings-note">
+                  How to reach stops and how cautious connections should be.
+                </p>
                 <div
                   className="theme-options"
                   role="radiogroup"
-                  aria-label="Bicycle route preference"
+                  aria-label="Access to public transport"
                 >
                   {(
                     [
-                      ['quick', 'Quick'],
-                      ['safe', 'Safer'],
-                      ['flat', 'Flatter'],
+                      ['foot', 'Walk'],
+                      ['bicycle', 'Own bike'],
+                      ['bike_rental', 'City bike'],
                     ] as const
                   ).map(([mode, label]) => (
                     <button
                       type="button"
                       role="radio"
-                      aria-checked={transitPreferences.value.bikeOptimisation === mode}
+                      aria-checked={transitPreferences.value.accessMode === mode}
                       className={
-                        transitPreferences.value.bikeOptimisation === mode
+                        transitPreferences.value.accessMode === mode
                           ? 'theme-option theme-option-on'
                           : 'theme-option'
                       }
-                      onClick={() => void transitPreferences.patch({ bikeOptimisation: mode })}
+                      onClick={() => void transitPreferences.patch({ accessMode: mode })}
                       key={mode}
                     >
                       {label}
                     </button>
                   ))}
                 </div>
-              </>
-            )}
-            <VehicleSection vehicle={vehicle} />
-            <h3>Direction arrow</h3>
-            <div className="theme-options" role="radiogroup" aria-label="Direction arrow source">
-              {(
-                [
-                  ['auto', 'Auto'],
-                  ['compass', 'Compass'],
-                  ['gps', 'GPS course'],
-                ] as const
-              ).map(([source, label]) => (
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={navPrefs.headingSource === source}
-                  className={
-                    navPrefs.headingSource === source
-                      ? 'theme-option theme-option-on'
-                      : 'theme-option'
-                  }
-                  onClick={() => navPrefs.setHeadingSource(source)}
-                  key={source}
+                <label className="style-range">
+                  <span>Walking pace</span>
+                  <input
+                    type="range"
+                    min={0.8}
+                    max={1.8}
+                    step={0.1}
+                    value={transitPreferences.value.walkSpeedMps}
+                    onChange={(event) =>
+                      void transitPreferences.patch({ walkSpeedMps: Number(event.target.value) })
+                    }
+                  />
+                  <output>{transitPreferences.value.walkSpeedMps.toFixed(1)} m/s</output>
+                </label>
+                <label className="style-range">
+                  <span>Transfer buffer</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={600}
+                    step={60}
+                    value={transitPreferences.value.transferSlackSeconds}
+                    onChange={(event) =>
+                      void transitPreferences.patch({
+                        transferSlackSeconds: Number(event.target.value),
+                      })
+                    }
+                  />
+                  <output>
+                    {Math.round(transitPreferences.value.transferSlackSeconds / 60)} min
+                  </output>
+                </label>
+                <label className="style-range">
+                  <span>Walking tolerance</span>
+                  <input
+                    type="range"
+                    min={1}
+                    max={10}
+                    step={1}
+                    value={transitPreferences.value.walkReluctance}
+                    onChange={(event) =>
+                      void transitPreferences.patch({ walkReluctance: Number(event.target.value) })
+                    }
+                  />
+                  <output>
+                    {transitPreferences.value.walkReluctance <= 2
+                      ? 'Flexible'
+                      : transitPreferences.value.walkReluctance <= 5
+                        ? 'Less walking'
+                        : 'Minimal'}
+                  </output>
+                </label>
+                <label className="style-range">
+                  <span>Maximum transfers</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={6}
+                    step={1}
+                    value={transitPreferences.value.maximumTransfers}
+                    onChange={(event) =>
+                      void transitPreferences.patch({
+                        maximumTransfers: Number(event.target.value),
+                      })
+                    }
+                  />
+                  <output>{transitPreferences.value.maximumTransfers}</output>
+                </label>
+                {transitPreferences.value.accessMode !== 'foot' && (
+                  <>
+                    <h3>Bicycle route to stops</h3>
+                    <div
+                      className="theme-options"
+                      role="radiogroup"
+                      aria-label="Bicycle route preference"
+                    >
+                      {(
+                        [
+                          ['quick', 'Quick'],
+                          ['safe', 'Safer'],
+                          ['flat', 'Flatter'],
+                        ] as const
+                      ).map(([mode, label]) => (
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={transitPreferences.value.bikeOptimisation === mode}
+                          className={
+                            transitPreferences.value.bikeOptimisation === mode
+                              ? 'theme-option theme-option-on'
+                              : 'theme-option'
+                          }
+                          onClick={() => void transitPreferences.patch({ bikeOptimisation: mode })}
+                          key={mode}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </section>
+              <section className="settings-group">
+                <VehicleSection vehicle={vehicle} />
+              </section>
+              <section className="settings-group">
+                <h3>Direction arrow</h3>
+                <div
+                  className="theme-options"
+                  role="radiogroup"
+                  aria-label="Direction arrow source"
                 >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <p className="settings-note">
-              Auto uses the compass while still and the steadier travel course once moving.
-            </p>
-            <h3>Navigation widgets</h3>
-            <div
-              className="theme-options nav-widget-options"
-              role="group"
-              aria-label="Navigation widgets"
-            >
-              {NAV_WIDGETS.map((widget) => {
-                const selected = navPrefs.widgets.includes(widget.id);
-                const full = navPrefs.widgets.length >= MAX_NAV_WIDGETS;
-                return (
-                  <button
-                    type="button"
-                    aria-pressed={selected}
-                    className={selected ? 'theme-option theme-option-on' : 'theme-option'}
-                    disabled={!selected && full}
-                    onClick={() => navPrefs.toggleWidget(widget.id)}
-                    key={widget.id}
-                  >
-                    {widget.label}
-                  </button>
-                );
-              })}
-            </div>
-            <p className="settings-note">Choose up to three readouts for active guidance.</p>
-          </div>
-        )}
+                  {(
+                    [
+                      ['auto', 'Auto'],
+                      ['compass', 'Compass'],
+                      ['gps', 'GPS course'],
+                    ] as const
+                  ).map(([source, label]) => (
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={navPrefs.headingSource === source}
+                      className={
+                        navPrefs.headingSource === source
+                          ? 'theme-option theme-option-on'
+                          : 'theme-option'
+                      }
+                      onClick={() => navPrefs.setHeadingSource(source)}
+                      key={source}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <p className="settings-note">
+                  Auto uses the compass while still and the steadier travel course once moving.
+                </p>
+                <h3>Navigation widgets</h3>
+                <div
+                  className="theme-options nav-widget-options"
+                  role="group"
+                  aria-label="Navigation widgets"
+                >
+                  {NAV_WIDGETS.map((widget) => {
+                    const selected = navPrefs.widgets.includes(widget.id);
+                    const full = navPrefs.widgets.length >= MAX_NAV_WIDGETS;
+                    return (
+                      <button
+                        type="button"
+                        aria-pressed={selected}
+                        className={selected ? 'theme-option theme-option-on' : 'theme-option'}
+                        disabled={!selected && full}
+                        onClick={() => navPrefs.toggleWidget(widget.id)}
+                        key={widget.id}
+                      >
+                        {widget.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="settings-note">Choose up to three readouts for active guidance.</p>
+              </section>
+            </>
+          )}
 
-        {tab === 'account' && (
-          <div className="settings-section">
-            <h3>Account &amp; sync</h3>
-            <AccountPanel sync={sync} storage={storage} />
-            {sync.email && <GarminPanel garmin={garmin} />}
-            {/* Also on the Collections header. Two homes on purpose: Android
+          {tab === 'account' && (
+            <>
+              <section className="settings-group">
+                <h3>Account &amp; sync</h3>
+                <AccountPanel sync={sync} storage={storage} />
+              </section>
+              {sync.email && (
+                <section className="settings-group">
+                  <GarminPanel garmin={garmin} />
+                </section>
+              )}
+              <section className="settings-group">
+                {/* Also on the Collections header. Two homes on purpose: Android
                 keeps it here, and a user who learned it there should find it
                 here too (rule 5 is about the data, not one route to it). */}
-            <h3>Your data</h3>
-            <p className="settings-note">
-              Export everything — places, folders, tracks and settings — as a file.
-            </p>
-            <button type="button" onClick={onExportAll} disabled={storage.status !== 'ready'}>
-              Export all data
-            </button>
-          </div>
-        )}
+                <h3>Your data</h3>
+                <p className="settings-note">
+                  Export everything — places, folders, tracks and settings — as a file.
+                </p>
+                <button type="button" onClick={onExportAll} disabled={storage.status !== 'ready'}>
+                  Export all data
+                </button>
+              </section>
+            </>
+          )}
 
-        {tab === 'system' && (
-          <div className="settings-section">
-            <div className="settings-section-head">
-              <h3>Data sources</h3>
-              <button
-                type="button"
-                className="link-button"
-                onClick={status.refresh}
-                disabled={status.loading}
-              >
-                {status.loading ? 'Checking…' : 'Refresh'}
-              </button>
-            </div>
-            {status.error && !status.data && (
-              <p className="settings-note settings-error">Status unavailable — {status.error}.</p>
-            )}
-            {!status.data && !status.error && <p className="settings-note">Loading…</p>}
-            {status.data && <StatusSection data={status.data} status={status} />}
-            <p className="settings-note">
-              The server checks every data source by itself a few times a day, and also learns from
-              what the app actually uses. A source stays “not checked” until one of the two has
-              reached it.
-            </p>
-          </div>
-        )}
+          {tab === 'system' && (
+            <section className="settings-group">
+              <div className="settings-section-head">
+                <h3>Data sources</h3>
+                <button
+                  type="button"
+                  className="link-button"
+                  onClick={status.refresh}
+                  disabled={status.loading}
+                >
+                  {status.loading ? 'Checking…' : 'Refresh'}
+                </button>
+              </div>
+              {status.error && !status.data && (
+                <p className="settings-note settings-error">Status unavailable — {status.error}.</p>
+              )}
+              {!status.data && !status.error && <p className="settings-note">Loading…</p>}
+              {status.data && <StatusSection data={status.data} status={status} />}
+              <p className="settings-note">
+                The server checks every data source by itself a few times a day, and also learns
+                from what the app actually uses. A source stays “not checked” until one of the two
+                has reached it.
+              </p>
+            </section>
+          )}
+        </div>
       </div>
     </aside>
   );

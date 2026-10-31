@@ -6,6 +6,7 @@ import {
   mockRouting,
   mockSearch,
   openRoutePlannerAt,
+  pickProfile,
   project,
   waitForMap,
 } from './helpers';
@@ -201,7 +202,7 @@ test('POI categories query the viewport and open a full details card', async ({ 
 
   // The choice belongs to Explore. Switching profile restores that profile's
   // untouched default instead of globally stripping POIs from every map.
-  await page.getByRole('radio', { name: 'Hike' }).click();
+  await pickProfile(page, 'Hike');
   await expect
     .poll(() => page.evaluate(() => Boolean(window.__atlasMap!.getLayer('poi_r20'))))
     .toBe(false);
@@ -347,7 +348,7 @@ test('dark mode themes the UI and basemap, persists, and profiles change map emp
       ),
     )
     .toBe('#123456');
-  await page.getByRole('radio', { name: 'Hike' }).click();
+  await pickProfile(page, 'Hike');
   await expect
     .poll(() => page.evaluate(() => window.__atlasMap!.getStyle().name))
     .toBe('Atlas Dark · hike');
@@ -400,8 +401,11 @@ test('every profile can enter and leave 3D terrain', async ({ page }) => {
   // It is one choice, not one per profile: switching activity keeps it. (Not
   // asserted through the style name — on this one-layer fixture Explore and
   // Drive differ only in `name`, which MapLibre's style diff never applies.)
-  await page.getByRole('radio', { name: 'Drive' }).click();
-  await expect(page.getByRole('radio', { name: 'Drive' })).toHaveAttribute('aria-checked', 'true');
+  await pickProfile(page, 'Drive');
+  await expect(page.getByRole('button', { name: /^Map profile/ })).toHaveAttribute(
+    'aria-label',
+    'Map profile: Drive',
+  );
   await expect(page.getByRole('button', { name: 'Switch to 2D map' })).toBeVisible();
   expect(await page.evaluate(() => window.__atlasMap!.getStyle().terrain)).toEqual({
     source: 'atlas-terrain-dem',
@@ -604,7 +608,7 @@ test('a satellite tap opens the on-device pass predictor', async ({ page }) => {
 
   await page.goto('/');
   await waitForMap(page);
-  await page.getByRole('radio', { name: 'Curiosities' }).click();
+  await pickProfile(page, 'Curiosities');
   await page.getByRole('button', { name: /^Map layers/ }).click();
   await page.getByRole('switch', { name: 'Satellites & ISS' }).click();
   await page.keyboard.press('Escape');
@@ -723,7 +727,7 @@ test('a freshly launched batch is drawn as a purple train', async ({ page }) => 
 
   await page.goto('/');
   await waitForMap(page);
-  await page.getByRole('radio', { name: 'Curiosities' }).click();
+  await pickProfile(page, 'Curiosities');
   await page.getByRole('button', { name: /^Map layers/ }).click();
   await page.getByRole('switch', { name: 'Satellites & ISS' }).click();
   await page.keyboard.press('Escape');
@@ -812,7 +816,7 @@ test('Curiosities draws public toilets and says whether one is shut for winter',
 
   await page.goto('/#map=12/60/10');
   await waitForMap(page);
-  await page.getByRole('radio', { name: 'Curiosities' }).click();
+  await pickProfile(page, 'Curiosities');
   await page.getByRole('button', { name: /^Map layers/ }).click();
   await page.getByRole('switch', { name: 'Public toilets' }).click();
   await page.keyboard.press('Escape');
@@ -937,7 +941,7 @@ test('Fish & Hunt shows live ice times and saves a permit as a filled area', asy
 
   await page.goto('/#map=10/60/10');
   await waitForMap(page);
-  await page.getByRole('radio', { name: 'Fish & Hunt' }).click();
+  await pickProfile(page, 'Fish & Hunt');
   await expect
     .poll(() =>
       page.evaluate(
@@ -979,7 +983,11 @@ test('Fish & Hunt shows live ice times and saves a permit as a filled area', asy
   // and not on the map: the map-level copy could not choose a folder and was
   // removed in v0.129.0.
   await page.getByRole('button', { name: 'Collections', exact: true }).click();
-  await page.getByRole('button', { name: 'iNatur permit' }).click();
+  await page.getByRole('button', { name: 'More actions for Collections', exact: true }).click();
+  await page
+    .getByRole('group', { name: 'Collections actions', exact: true })
+    .getByRole('button', { name: 'iNatur permit' })
+    .click();
   await page.getByLabel('iNatur offer link or id').fill('0123456789abcdef01234567');
   await page.getByRole('button', { name: 'Add permit area' }).click();
 
@@ -1447,8 +1455,11 @@ test('a planned route saves as a track and reopens as an editable route', async 
   await page.getByRole('button', { name: 'Collections' }).click();
   const sidebar = page.locator('.sidebar');
   await expect(sidebar).toContainText('Desktop ride');
-  await sidebar.getByRole('button', { name: 'Edit Desktop ride' }).click();
-  await sidebar.getByRole('button', { name: 'Plan as route' }).click();
+  await sidebar.getByRole('button', { name: 'More actions for Desktop ride', exact: true }).click();
+  await page
+    .getByRole('group', { name: 'Desktop ride actions', exact: true })
+    .getByRole('button', { name: 'Plan as route' })
+    .click();
 
   await expect(page.locator('.route-panel')).toBeVisible();
   await expect(page.locator('.route-waypoints li')).toHaveCount(2);
