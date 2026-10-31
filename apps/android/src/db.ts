@@ -19,9 +19,32 @@ import type { SQLiteBindValue } from 'expo-sqlite';
  * its write is simply gone. That is what shipped until v0.202.0; it lost
  * settings quietly until `setSetting` started reporting failures, at which
  * point it started losing them loudly.
+ *
+ * The queue cannot exclude a connection it does not own, and one exists for a
+ * moment on every OTA restart: `Updates.reloadAsync()` starts the new JS
+ * runtime while the old one's connection is still open — sometimes reading.
+ * In rollback-journal mode a single reader there fails our COMMIT with
+ * `database is locked`, and the first write of every new version (the
+ * last-run marker) lost exactly that race. So the file runs in WAL, where
+ * readers never block a commit, with a busy timeout so an overlapping writer
+ * is waited out rather than reported; and {@link releaseStorage} lets the
+ * restart close our connection first, so it never outlives its runtime with a
+ * half-run batch.
  */
+let live: AtlasStorage | null = null;
+
 export async function openStorage(): Promise<AtlasStorage> {
   const db = await openDatabaseAsync('atlas.db');
+  // Busy timeout first: switching to WAL itself needs a moment alone with the
+  // file. A switch that still loses (a lock held past the timeout) leaves the
+  // old journal mode for this session — worth a retry next launch, not a
+  // database the app cannot open. WAL is persistent once it takes.
+  await db.execAsync('PRAGMA busy_timeout = 5000');
+  try {
+    await db.execAsync('PRAGMA journal_mode = WAL');
+  } catch {
+    // Retried on the next open; the busy timeout still covers this session.
+  }
   const driver: SqlDriver = {
     async query(sql, params = []) {
       return db.getAllAsync<SqlRow>(sql, params as SQLiteBindValue[]);
@@ -54,10 +77,23 @@ export async function openStorage(): Promise<AtlasStorage> {
       await db.execAsync(sql);
     },
     async close() {
+      if (live === storage) live = null;
       await db.closeAsync();
     },
   };
   const storage = new AtlasStorage(serializeDriver(driver));
   await storage.init();
+  live = storage;
   return storage;
+}
+
+/**
+ * Close the open user-data database, after every call already queued on it.
+ * For a JS restart only (the OTA relaunch): the storage handed to the app is
+ * dead afterwards, and nothing reopens it in this runtime.
+ */
+export async function releaseStorage(): Promise<void> {
+  const storage = live;
+  live = null;
+  await storage?.close();
 }

@@ -2,6 +2,7 @@ import * as Updates from 'expo-updates';
 import { useCallback, useState } from 'react';
 
 import appJson from '../../app.json';
+import { releaseStorage } from '../db';
 
 /**
  * The version of the *running JS bundle* — from app.json at bundle time, so an
@@ -21,6 +22,19 @@ export interface OtaUpdateState {
   check: () => void;
   /** Relaunch into the downloaded bundle (status 'ready'). */
   restart: () => void;
+}
+
+/**
+ * Relaunch into the downloaded bundle, closing the user-data database first so
+ * the old runtime's connection cannot hold a lock — or a half-run batch — over
+ * the new one (see ../db). A close that fails must not block the update.
+ */
+export async function relaunchIntoUpdate(): Promise<void> {
+  try {
+    await releaseStorage();
+  } finally {
+    await Updates.reloadAsync();
+  }
 }
 
 /**
@@ -50,7 +64,7 @@ export function useOtaUpdate(): OtaUpdateState {
   }, []);
 
   const restart = useCallback(() => {
-    void Updates.reloadAsync();
+    void relaunchIntoUpdate();
   }, []);
 
   return { enabled: Updates.isEnabled, status, check, restart };

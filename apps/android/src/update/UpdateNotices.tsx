@@ -3,7 +3,7 @@ import * as Updates from 'expo-updates';
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
 
-import { JS_VERSION } from './useOtaUpdate';
+import { JS_VERSION, relaunchIntoUpdate } from './useOtaUpdate';
 
 const LAST_RUN_KEY = 'local.app.lastRunVersion';
 
@@ -50,7 +50,7 @@ export function UpdateNotices({
     return (
       <Pressable
         style={[styles.notice, styles.restart, { top: topInset + 60 }]}
-        onPress={() => void Updates.reloadAsync()}
+        onPress={() => void relaunchIntoUpdate()}
         testID="ota-restart"
       >
         <Text style={styles.noticeText}>Update ready — tap to restart</Text>
