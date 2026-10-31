@@ -59,6 +59,7 @@ import {
   useWeatherGrid,
   useWeatherMaps,
   useSkyLayers,
+  quickAccessTiles,
   type FetchNearbyFn,
   type PotentialView,
   type PoiViewportFetch,
@@ -1073,6 +1074,20 @@ export function App() {
     });
   }, []);
 
+  // Every pinned place, in the order Collections draws its tiles.
+  const quickAccessPlaces = useMemo(
+    () => quickAccessTiles(userData.places, true).shown,
+    [userData.places],
+  );
+  const showQuickAccessPlace = useCallback(
+    (place: PlaceRecord) => {
+      closePanels();
+      setPin(null);
+      showPlace(place);
+    },
+    [closePanels, showPlace],
+  );
+
   const showTrack = useCallback(
     (track: TrackRecord) => {
       void getTrackData(track.id).then((data) => {
@@ -1373,6 +1388,8 @@ export function App() {
           places={userData.places}
           tracks={userData.tracks}
           folders={userData.collections}
+          quickAccess={quickAccessPlaces}
+          onPickPlace={showQuickAccessPlace}
         />
         <button
           type="button"
@@ -1545,12 +1562,16 @@ export function App() {
               when none of them has a variant to pick. */}
           <LayerFilterSwitch filters={layerFilters} />
           <div className="map-control-primary">
+            <LayerQuickSwitch layers={layers} mapZoom={mapZoom} />
+          </div>
+          {/* The profile sits at the foot of the column, beside locate and
+              follow: beside the layers button it hung halfway up the map. */}
+          <div className="map-control-profile">
             <MapProfileSwitch
               active={profiles.profile.id}
               profiles={profilePreferences.visibleProfiles}
               onPick={onPickProfile}
             />
-            <LayerQuickSwitch layers={layers} mapZoom={mapZoom} />
           </div>
           <div className="map-control-group" role="group" aria-label="Map tools">
             <TerrainControl

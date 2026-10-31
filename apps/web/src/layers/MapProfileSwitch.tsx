@@ -69,7 +69,7 @@ export function MapProfileSwitch({ active, profiles, onPick }: MapProfileSwitchP
         aria-label={`Map profile: ${current?.label ?? 'Choose'}`}
         aria-expanded={open}
         aria-haspopup="true"
-        data-tip="Activity profile"
+        data-tip="Change map profile"
         onClick={() => setOpen((value) => !value)}
       >
         {CurrentIcon && <CurrentIcon size={20} />}

@@ -1,4 +1,4 @@
-import { useRecentSearches, useSearch, type SearchFn } from '@atlas/app-hooks';
+import { libraryPlaceName, useRecentSearches, useSearch, type SearchFn } from '@atlas/app-hooks';
 import {
   isCollectionSearchResult,
   type LatLng,
@@ -8,6 +8,7 @@ import {
   type SearchableTrack,
   type SearchResult,
 } from '@atlas/core';
+import type { PlaceRecord } from '@atlas/storage';
 import { useCallback, useMemo, useState } from 'react';
 
 interface SearchBoxProps {
@@ -19,7 +20,18 @@ interface SearchBoxProps {
   places: SearchablePlace[];
   tracks: SearchableTrack[];
   folders: SearchableFolder[];
+  /**
+   * The places pinned to Quick access, offered whenever the box is empty. They
+   * were only reachable by opening Collections first, so a shortcut was a
+   * detour for anyone who starts from the search box.
+   */
+  quickAccess: readonly PlaceRecord[];
+  /** Show a Quick access place, as its tile in Collections does. */
+  onPickPlace: (place: PlaceRecord) => void;
 }
+
+/** A row the empty-box dropdown can land on: a Quick access place or a recent pick. */
+type Entry = { kind: 'quick'; place: PlaceRecord } | { kind: 'result'; result: MainSearchResult };
 
 /**
  * Recents are kept in `localStorage`, not in the OPFS database: they are a
@@ -29,7 +41,15 @@ interface SearchBoxProps {
  */
 const RECENT_KEY = 'atlas.search.recent';
 
-export function SearchBox({ onSelect, getBias, places, tracks, folders }: SearchBoxProps) {
+export function SearchBox({
+  onSelect,
+  getBias,
+  places,
+  tracks,
+  folders,
+  quickAccess,
+  onPickPlace,
+}: SearchBoxProps) {
   const fetchSearch = useCallback<SearchFn>(
     async ({ text, signal }) => {
       const params = new URLSearchParams({ q: text });
@@ -66,12 +86,25 @@ export function SearchBox({ onSelect, getBias, places, tracks, folders }: Search
 
   // An empty (or too-short) query shows the recent picks instead of results.
   const showingRecent = search.query.trim().length < 2;
-  const shown = showingRecent ? recent : search.results;
+  const quick: Entry[] = showingRecent
+    ? quickAccess.map((place) => ({ kind: 'quick', place }))
+    : [];
+  const results: Entry[] = (showingRecent ? recent : search.results).map((result) => ({
+    kind: 'result',
+    result,
+  }));
+  const shown = [...quick, ...results];
 
-  const pick = (result: MainSearchResult) => {
+  const pick = (entry: Entry) => {
+    setOpen(false);
+    if (entry.kind === 'quick') {
+      search.settle(libraryPlaceName(entry.place));
+      onPickPlace(entry.place);
+      return;
+    }
+    const { result } = entry;
     if (!isCollectionSearchResult(result)) remember(result);
     search.settle(result.name);
-    setOpen(false);
     onSelect(result);
   };
 
@@ -91,11 +124,57 @@ export function SearchBox({ onSelect, getBias, places, tracks, folders }: Search
       e.preventDefault();
       setHighlighted((i) => Math.max(i - 1, 0));
     } else if (e.key === 'Enter') {
-      const result = shown[highlighted];
-      if (result) pick(result);
+      const entry = shown[highlighted];
+      if (entry) pick(entry);
     } else if (e.key === 'Escape') {
       setOpen(false);
     }
+  };
+
+  const renderEntry = (entry: Entry, i: number) => {
+    const quickPlace = entry.kind === 'quick' ? entry.place : null;
+    let key: string;
+    let name: string;
+    let label: string;
+    if (entry.kind === 'quick') {
+      key = `quick/${entry.place.id}`;
+      name = libraryPlaceName(entry.place);
+      label = entry.place.address || 'Saved place';
+    } else {
+      const { result } = entry;
+      key = isCollectionSearchResult(result)
+        ? `${result.collectionTarget.kind}/${result.collectionTarget.id}`
+        : `${result.position.lat}/${result.position.lng}/${result.name}`;
+      name = result.name;
+      label = result.label;
+    }
+    return (
+      <li
+        key={key}
+        role="option"
+        aria-selected={i === highlighted}
+        className={`${quickPlace ? 'searchbox-quick' : ''}${i === highlighted ? ' highlighted' : ''}`}
+        onMouseEnter={() => setHighlighted(i)}
+        onMouseDown={(e) => {
+          e.preventDefault(); // keep input focus
+          pick(entry);
+        }}
+      >
+        {quickPlace && (
+          <span
+            className="searchbox-quick-icon"
+            style={{ background: quickPlace.color }}
+            aria-hidden="true"
+          >
+            {quickPlace.icon}
+          </span>
+        )}
+        <span className="result-text">
+          <span className="result-name">{name}</span>
+          {label && <span className="result-label">{label}</span>}
+        </span>
+      </li>
+    );
   };
 
   return (
@@ -116,8 +195,14 @@ export function SearchBox({ onSelect, getBias, places, tracks, folders }: Search
       />
       {open && (shown.length > 0 || search.statusText !== null) && (
         <ul className="searchbox-results" role="listbox">
-          {showingRecent && (
-            <li className="searchbox-tag">
+          {quick.length > 0 && (
+            <li className="searchbox-tag" role="presentation">
+              <span>Quick access</span>
+            </li>
+          )}
+          {shown.slice(0, quick.length).map((entry, i) => renderEntry(entry, i))}
+          {showingRecent && recent.length > 0 && (
+            <li className="searchbox-tag" role="presentation">
               <span>Recent</span>
               <button
                 type="button"
@@ -135,26 +220,7 @@ export function SearchBox({ onSelect, getBias, places, tracks, folders }: Search
               {search.statusText}
             </li>
           )}
-          {shown.map((result, i) => (
-            <li
-              key={
-                isCollectionSearchResult(result)
-                  ? `${result.collectionTarget.kind}/${result.collectionTarget.id}`
-                  : `${result.position.lat}/${result.position.lng}/${result.name}`
-              }
-              role="option"
-              aria-selected={i === highlighted}
-              className={i === highlighted ? 'highlighted' : undefined}
-              onMouseEnter={() => setHighlighted(i)}
-              onMouseDown={(e) => {
-                e.preventDefault(); // keep input focus
-                pick(result);
-              }}
-            >
-              <span className="result-name">{result.name}</span>
-              {result.label && <span className="result-label">{result.label}</span>}
-            </li>
-          ))}
+          {shown.slice(quick.length).map((entry, i) => renderEntry(entry, quick.length + i))}
         </ul>
       )}
     </div>

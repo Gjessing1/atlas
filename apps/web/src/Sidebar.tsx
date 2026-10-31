@@ -528,9 +528,10 @@ export function Sidebar({
             className="item-name"
             aria-label={name}
             aria-description={`${libraryPlaceLine(place, data.collections)}. ${mapState}`}
+            title={`${name}\n${libraryPlaceLine(place, data.collections)}`}
             onClick={() => onShowPlace(place)}
           >
-            {name}
+            <span className="item-title">{name}</span>
             <span className="item-context">{libraryPlaceLine(place, data.collections)}</span>
           </button>
           <span className="row-actions">
@@ -616,7 +617,8 @@ export function Sidebar({
         className={`item-row${selectedTrackId === track.id ? ' selected' : ''}${key === highlighted ? ' revealed' : ''}`}
       >
         <div className="item-line" onContextMenu={openRowMenu}>
-          <span className="row-indent" aria-hidden="true" />
+          {/* Lines up with the folder chevrons in the tree; a flat list has none. */}
+          {view === 'folders' && <span className="row-indent" aria-hidden="true" />}
           <span className="item-icon track-icon" aria-hidden="true">
             {garminSportIcon(libraryTrackSport(track))}
           </span>
@@ -625,9 +627,10 @@ export function Sidebar({
             className="item-name"
             aria-label={track.name}
             aria-description={`${libraryTrackLine(track)}. ${mapState}`}
+            title={`${track.name}\n${libraryTrackLine(track)}`}
             onClick={() => onShowTrack(track)}
           >
-            {track.name}
+            <span className="item-title">{track.name}</span>
             <span className="item-context">{libraryTrackLine(track)}</span>
           </button>
           <span className="row-actions">
@@ -747,6 +750,8 @@ export function Sidebar({
           // answer, so it opens: the whole point is to see the matches, not to
           // be told which folders they are in.
           const open = expandedFolders.has(folder.id) || filtered.active;
+          const node = tree.byId.get(folder.id) ?? EMPTY_FOLDER;
+          const contents = folderContentsLine(node);
           return (
             <li
               key={folder.id}
@@ -798,70 +803,80 @@ export function Sidebar({
                 ) : (
                   // The name is the obvious thing to click to open a folder;
                   // making the 16 px chevron the only target was the complaint.
+                  // Its count sits right after it, on the same line: a count on a
+                  // row of its own read as a separate entry under the folder.
                   <button
                     type="button"
                     className="folder-name"
+                    aria-label={folder.name}
+                    aria-description={contents}
                     aria-expanded={open}
+                    title={contents}
                     onClick={() => toggleFolder(folder.id)}
                   >
-                    {folder.name}
+                    <span className="folder-name-text">{folder.name}</span>
+                    <span className="folder-count" aria-hidden="true">
+                      {node.children.length + node.places.length + node.tracks.length}
+                    </span>
                   </button>
                 )}
-                <CollectionMenu title={folder.name}>
-                  {folder.parentId !== null && (
+                <span className="row-actions">
+                  <CollectionMenu title={folder.name}>
+                    {folder.parentId !== null && (
+                      <button
+                        type="button"
+                        className="icon-button"
+                        aria-label={`Move ${folder.name} up one level`}
+                        title="Move up one level"
+                        onClick={() => moveCollectionUp(folder)}
+                      >
+                        Move up one level
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="icon-button"
-                      aria-label={`Move ${folder.name} up one level`}
-                      title="Move up one level"
-                      onClick={() => moveCollectionUp(folder)}
+                      aria-label={`New folder inside ${folder.name}`}
+                      title="New subfolder"
+                      onClick={() => startCreating(folder.id)}
                     >
-                      Move up one level
+                      New subfolder
                     </button>
-                  )}
-                  <button
-                    type="button"
-                    className="icon-button"
-                    aria-label={`New folder inside ${folder.name}`}
-                    title="New subfolder"
-                    onClick={() => startCreating(folder.id)}
-                  >
-                    New subfolder
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-button"
-                    aria-label={`Rename ${folder.name}`}
-                    onClick={() => setRenaming(folder.id)}
-                  >
-                    Rename
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-button"
-                    aria-label={`Delete ${folder.name}`}
-                    title="Delete folder (contents move up a level)"
-                    onClick={() =>
-                      setConfirm({
-                        title: `Delete folder “${folder.name}”?`,
-                        body: 'Places, tracks and subfolders inside it move up one level.',
-                        confirmLabel: 'Delete folder',
-                        onConfirm: () => void data.deleteCollection(folder.id),
-                      })
-                    }
-                  >
-                    Delete folder…
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`Names of ${folder.name} on the map`}
-                    aria-pressed={folderHasPinLabels(pinLabels.prefs, folder.id)}
-                    onClick={() => void pinLabels.toggleFolder(folder.id)}
-                  >
-                    <PinLabelIcon size={18} />
-                    Show labels
-                  </button>
-                </CollectionMenu>
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label={`Rename ${folder.name}`}
+                      onClick={() => setRenaming(folder.id)}
+                    >
+                      Rename
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label={`Delete ${folder.name}`}
+                      title="Delete folder (contents move up a level)"
+                      onClick={() =>
+                        setConfirm({
+                          title: `Delete folder “${folder.name}”?`,
+                          body: 'Places, tracks and subfolders inside it move up one level.',
+                          confirmLabel: 'Delete folder',
+                          onConfirm: () => void data.deleteCollection(folder.id),
+                        })
+                      }
+                    >
+                      Delete folder…
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Names of ${folder.name} on the map`}
+                      aria-pressed={folderHasPinLabels(pinLabels.prefs, folder.id)}
+                      onClick={() => void pinLabels.toggleFolder(folder.id)}
+                    >
+                      <PinLabelIcon size={18} />
+                      Show labels
+                    </button>
+                  </CollectionMenu>
+                </span>
                 {/* Showing or hiding a folder is a map setting; what is filed in it stays. */}
                 <button
                   type="button"
@@ -877,11 +892,6 @@ export function Sidebar({
                   <EyeIcon off={!folder.visible} size={18} />
                 </button>
               </div>
-              {!open && (
-                <div className="folder-context">
-                  {folderContentsLine(tree.byId.get(folder.id) ?? EMPTY_FOLDER)}
-                </div>
-              )}
               {open && branch(folder.id, depth + 1)}
             </li>
           );
@@ -898,9 +908,7 @@ export function Sidebar({
                 <MapPinIcon size={18} />
                 <span>
                   All places
-                  <small>
-                    {data.places.length} {data.places.length === 1 ? 'place' : 'places'}
-                  </small>
+                  <small aria-hidden="true">{data.places.length}</small>
                 </span>
                 <span aria-hidden="true">›</span>
               </button>

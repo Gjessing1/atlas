@@ -41,9 +41,9 @@ test('main search reveals nested saved folders and tracks in Collections', async
   await search.fill('Ridge plans');
   await expect(page.getByRole('option', { name: /Ridge plans Saved folder/ })).toBeVisible();
   await page.getByRole('option', { name: /Ridge plans Saved folder/ }).click();
-  await expect(page.locator('.sidebar .folder-row.revealed .folder-name')).toHaveText(
-    'Ridge plans',
-  );
+  await expect(
+    page.locator('.sidebar .folder-row.revealed .folder-name .folder-name-text'),
+  ).toHaveText('Ridge plans');
   await page.getByRole('button', { name: 'Close panel' }).click();
 
   await search.fill('Ridge route');
@@ -91,14 +91,20 @@ test('a nested collection can move up to the root', async ({ page }) => {
   await page.getByPlaceholder('New folder name').press('Enter');
 
   const parent = page.locator('.folder-row').filter({
-    has: page.locator(':scope > .item-line > .folder-name', { hasText: /^Parent$/ }),
+    has: page.locator(':scope > .item-line > .folder-name .folder-name-text', {
+      hasText: /^Parent$/,
+    }),
   });
-  await expect(parent.locator(':scope > .item-list .folder-name')).toHaveText('Child');
+  await expect(parent.locator(':scope > .item-list .folder-name .folder-name-text')).toHaveText(
+    'Child',
+  );
 
   await collectionAction(page, 'Child', 'Move Child up one level');
-  await expect(parent.locator(':scope > .item-list .folder-name')).toHaveCount(0);
+  await expect(parent.locator(':scope > .item-list .folder-name .folder-name-text')).toHaveCount(0);
   await expect(
-    page.locator('.sidebar-body > .item-list > .folder-row > .item-line > .folder-name'),
+    page.locator(
+      '.sidebar-body > .item-list > .folder-row > .item-line > .folder-name .folder-name-text',
+    ),
   ).toHaveText(['Parent', 'Child']);
 });
 
@@ -122,18 +128,24 @@ test('a subfolder can be created inside a collapsed folder, and deletes are conf
   await page.getByPlaceholder('New folder name').press('Enter');
 
   const trips = page.locator('.folder-row').filter({
-    has: page.locator(':scope > .item-line > .folder-name', { hasText: /^Trips$/ }),
+    has: page.locator(':scope > .item-line > .folder-name .folder-name-text', {
+      hasText: /^Trips$/,
+    }),
   });
-  await expect(trips.locator(':scope > .item-list .folder-name')).toHaveText('Autumn');
+  await expect(trips.locator(':scope > .item-list .folder-name .folder-name-text')).toHaveText(
+    'Autumn',
+  );
 
   // Delete asks first — cancelling keeps the folder.
   await collectionAction(page, 'Autumn', 'Delete Autumn');
   await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel' }).click();
-  await expect(trips.locator(':scope > .item-list .folder-name')).toHaveText('Autumn');
+  await expect(trips.locator(':scope > .item-list .folder-name .folder-name-text')).toHaveText(
+    'Autumn',
+  );
 
   await collectionAction(page, 'Autumn', 'Delete Autumn');
   await page.getByRole('alertdialog').getByRole('button', { name: 'Delete folder' }).click();
-  await expect(trips.locator(':scope > .item-list .folder-name')).toHaveCount(0);
+  await expect(trips.locator(':scope > .item-list .folder-name .folder-name-text')).toHaveCount(0);
   await expect(page.locator('.undo-toast')).toBeVisible();
 });
 
@@ -150,7 +162,9 @@ test('a folder can be dragged into another folder', async ({ page }) => {
 
   const row = (name: string) =>
     page.locator('.folder-row').filter({
-      has: page.locator(':scope > .item-line > .folder-name', { hasText: new RegExp(`^${name}$`) }),
+      has: page.locator(':scope > .item-line > .folder-name .folder-name-text', {
+        hasText: new RegExp(`^${name}$`),
+      }),
     });
 
   // The middle of a folder row means "drop inside"; the edges reorder.
@@ -162,8 +176,10 @@ test('a folder can be dragged into another folder', async ({ page }) => {
 
   // Alpha is collapsed like every folder, so open it to see what landed inside.
   // Clicking the name is the whole target, not just the chevron.
-  await row('Alpha').locator(':scope > .item-line > .folder-name').click();
-  await expect(row('Alpha').locator(':scope > .item-list .folder-name')).toHaveText('Beta');
+  await row('Alpha').locator(':scope > .item-line > .folder-name .folder-name-text').click();
+  await expect(
+    row('Alpha').locator(':scope > .item-list .folder-name .folder-name-text'),
+  ).toHaveText('Beta');
 });
 
 test('a saved place reaches the planner from its row menu, and Export all has two homes', async ({
@@ -232,7 +248,7 @@ test('the tree can be filtered by name and by a tapped tag', async ({ page }) =>
   const filter = page.getByLabel('Filter collections');
   await filter.fill('stan');
   // The folder matched by name stays; the other one goes.
-  await expect(page.locator('.folder-name')).toHaveText(['Stands']);
+  await expect(page.locator('.folder-name .folder-name-text')).toHaveText(['Stands']);
 
   await filter.fill('fjell');
   await expect(page.locator('.sidebar-body')).toContainText('Nothing here matches');
@@ -242,7 +258,7 @@ test('the tree can be filtered by name and by a tapped tag', async ({ page }) =>
   await page.getByRole('button', { name: 'Filter by stand' }).click();
   await expect(filter).toHaveValue('#stand');
   await expect(page.locator('.item-name')).toHaveText([/Elgpost nord/]);
-  await expect(page.locator('.folder-name')).toHaveCount(0);
+  await expect(page.locator('.folder-name .folder-name-text')).toHaveCount(0);
 });
 
 test('a tag already in use is offered as a pill in another place’s editor', async ({ page }) => {
@@ -469,6 +485,17 @@ test('Places offers Quick access, human context, sorting, and clear inherited vi
   await page.getByRole('button', { name: 'Collections', exact: true }).click();
   const quick = page.locator('.quick-access');
   await expect(quick).toContainText('Home with a long and recognizable place name');
+  // The same shortcut waits in the main search box before anything is typed, so it is not
+  // only discoverable from Collections; picking it shows the place's card.
+  await page.getByRole('searchbox', { name: 'Search places' }).click();
+  const quickResult = page.locator('.searchbox-results .searchbox-quick');
+  await expect(quickResult).toHaveText([/Home with a long and recognizable place name/]);
+  await quickResult.click();
+  await expect(page.locator('.place-card-titles > strong')).toHaveText(
+    'Home with a long and recognizable place name',
+  );
+  await expect(page.locator('.sidebar')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Collections', exact: true }).click();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: 'test-results/collections-places-mobile.png' });
   await page.setViewportSize({ width: 1280, height: 720 });
@@ -479,7 +506,7 @@ test('Places offers Quick access, human context, sorting, and clear inherited vi
   await expect(page.locator('.folder-row .item-name')).toContainText([/Home with a long/]);
   await page.getByRole('button', { name: 'Collapse Family' }).click();
   await page.getByLabel('Filter collections').fill('Family');
-  await expect(page.locator('.folder-name')).toHaveText(['Family']);
+  await expect(page.locator('.folder-name-text')).toHaveText(['Family']);
   await expect(page.locator('.item-name')).toHaveCount(1);
   await page.getByRole('button', { name: 'Family', exact: true }).click();
   await expect(page.getByLabel('Filter collections')).toHaveValue('');
@@ -554,7 +581,11 @@ test('large libraries page their lists without changing map visibility', async (
     ),
   });
   const library = page.locator('.sidebar');
-  await expect(library).toContainText('780 places');
+  // The folder's count sits inline after its name; the breakdown is its tooltip.
+  const guide = library.getByRole('button', { name: 'Bobilguiden', exact: true });
+  await expect(guide.locator('.folder-count')).toHaveText('1005');
+  await expect(guide).toHaveAttribute('title', '225 tracks · 780 places');
+  await expect(library.locator('.all-places-row small')).toHaveText('780');
   await library.getByRole('button', { name: 'All places', exact: true }).click();
   await expect(library.locator('.item-row')).toHaveCount(40);
   await library.getByRole('button', { name: 'Show more places (740 remaining)' }).click();

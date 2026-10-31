@@ -41,7 +41,7 @@
   --control-size: 40px;
   --control-radius: 10px;
   --control-shadow: 0 1px 4px rgba(28, 39, 51, 0.22), 0 0 0 1px rgba(52, 64, 79, 0.06);
-  --cluster-gap: 12px;
+  --cluster-gap: 8px;
   --tooltip-bg: #1f262c;
   --tooltip-text: #fff;
   /* The two colours the map paints a fresh launch train in. Light mode reads
@@ -124,6 +124,9 @@ button {
 
 .topbar {
   position: absolute;
+  /* Above the drawers (Settings is 6): the search dropdown opens over an open
+     Collections or Explore panel instead of underneath it. */
+  z-index: 7;
   top: 12px;
   left: 12px;
   display: flex;
@@ -3182,27 +3185,30 @@ button.transit-notice-summary {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 6px;
+  gap: var(--cluster-gap);
 }
 
-/* Clusters stand further apart than the controls inside one, so the column
-   reads as modes / tools / navigation rather than eight equal buttons. */
-.map-control-grid > .map-control-group,
-.map-control-utilities {
-  margin-top: calc(var(--cluster-gap) - 6px);
-}
-
+/* Clusters are told apart by their joined plates, so one gap serves between
+   every group: modes / tools / view / position, all flush to the right edge. */
 .map-control-primary {
   display: flex;
   align-items: flex-end;
-  gap: 6px;
+  gap: var(--cluster-gap);
 }
 
 .map-control-utilities {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 6px;
+  gap: var(--cluster-gap);
+}
+
+/* The profile switcher, out of the column and level with its foot. Its menu
+   still opens upwards, right-aligned to the trigger. */
+.map-control-profile {
+  position: absolute;
+  right: calc(100% + var(--cluster-gap));
+  bottom: 0;
 }
 
 /* Every map control is the same plate: size, radius, shadow, hover, focus. */
@@ -7014,7 +7020,9 @@ button.transit-notice-summary {
   z-index: 6;
   top: var(--panel-top);
   right: var(--panel-inset);
-  bottom: var(--panel-inset);
+  /* As tall as the page it shows, up to the map's height — like Explore. A
+     panel pinned to the bottom edge was mostly empty on short pages. */
+  max-height: calc(100% - var(--panel-top) - var(--panel-inset));
   width: min(var(--panel-width), calc(100vw - 2 * var(--panel-inset)));
   display: flex;
   flex-direction: column;
@@ -8832,4 +8840,199 @@ button.transit-notice-summary {
     border-top: none;
     border-radius: var(--control-radius);
   }
+}
+
+/* ---- Collections: calm rows ----
+   Rows are transparent until hovered; a folder is told from its contents by
+   its icon, weight and the count right after its name — not by a grey band,
+   which made a long folder list read as a stack of buttons. */
+.folder-row > .item-line {
+  background: transparent;
+}
+
+.item-row > .item-line:hover,
+.folder-row > .item-line:hover {
+  background: var(--surface-muted);
+}
+
+.folder-name {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.folder-name:hover {
+  text-decoration: none;
+}
+
+.folder-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-name:hover .folder-name-text {
+  color: var(--accent);
+}
+
+.folder-count,
+.all-places-row small {
+  flex: none;
+  font-size: 12px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.all-places-row button > span:nth-child(2) {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.all-places-row small {
+  display: inline;
+}
+
+.item-list > li.all-places-row > button:hover {
+  background: var(--surface-muted);
+}
+
+/* Section headings: small, but with a rule and air enough to start a group. */
+.sidebar-section-head {
+  margin: 12px 4px 4px;
+  padding-top: 10px;
+}
+
+.sidebar-section-label {
+  margin: 12px 4px 4px;
+  padding-top: 10px;
+}
+
+/* A name gets two lines at most and its metadata one: a long activity title
+   or an address no longer wraps the row into a paragraph. Both are in the
+   row's tooltip and accessible description in full. */
+.sidebar .item-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: break-word;
+}
+
+.sidebar .item-context {
+  display: block;
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Tabs: blue text and underline when on, as Places always was; the ring is
+   for the keyboard, in the accent, never the browser's black default. */
+.library-tab:focus {
+  outline: none;
+}
+
+.library-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: 6px 6px 0 0;
+}
+
+.library-tab:hover:not(.active) {
+  color: var(--text);
+}
+
+/* Drawer scrollbars: thin and faint until the list is pointed at. */
+.sidebar-body,
+.settings-tab-body,
+.settings-tabs,
+.explore-panel,
+.map-popover,
+.collection-menu-panel,
+.searchbox-results {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-muted) 30%, transparent) transparent;
+}
+
+.sidebar-body:hover,
+.settings-tab-body:hover,
+.settings-tabs:hover,
+.explore-panel:hover,
+.map-popover:hover,
+.collection-menu-panel:hover,
+.searchbox-results:hover {
+  scrollbar-color: color-mix(in srgb, var(--text-muted) 55%, transparent) transparent;
+}
+
+/* Quick access in the search dropdown: the place's own badge beside its name. */
+.searchbox-results li.searchbox-quick,
+.searchbox-results li:has(> .result-text) {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+.searchbox-results .result-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.searchbox-quick-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.searchbox-results li.searchbox-tag + li.searchbox-tag,
+.searchbox-results li.searchbox-quick + li.searchbox-tag {
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+/* Quick access: three compact tiles to a row, so up to three shortcuts take a
+   single line and six take two. */
+.quick-tiles {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.quick-tile,
+.quick-tile-main {
+  border-radius: 10px;
+}
+
+.quick-tile-main {
+  gap: 6px;
+  min-height: 64px;
+  padding: 8px 10px 10px;
+}
+
+.quick-tile-icon {
+  width: 24px;
+  height: 24px;
+  font-size: 13px;
+}
+
+.quick-tile-name {
+  font-size: 13px;
+}
+
+.quick-tile-corner {
+  top: 6px;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  font-size: 12px;
 }
