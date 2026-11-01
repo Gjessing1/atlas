@@ -2,7 +2,8 @@
 
 `run-regression.sh` installs a release-candidate APK on the `atlas_test` AVD, starts the fixture
 backend on port 3199 (`fixture-server.mjs`) and drives the app (`regression.mjs`): saved
-places and folders, road and transit planning, navigation hand-off, persistence, and rotation. The ordinary OTA and APK publish scripts run it first. Native
+places and folders, road and transit planning, navigation hand-off, a restart through the OTA
+relaunch path, persistence, and rotation. The ordinary OTA and APK publish scripts run it first. Native
 releases use `publish-native.sh`, which tests one signed APK once, then publishes the APK and its
 OTA baseline together. A failed regression publishes neither artifact:
 
@@ -319,6 +320,12 @@ before that destination. Also:
   visible" with the field focused and present in `window.xml`; its screenshot showed Track name
   above the footer and the input below it. This was a harness visibility assumption, not a route
   or keyboard data error.
+- **The update relaunch is driven by Settings → System → Restart app** (`app-restart`). It takes
+  `relaunchIntoUpdate`, the same path as the update pill, without a downloaded update, since the
+  APK cannot be pointed at a test update server. `Updates.reloadAsync()` keeps the process, so the
+  step waits for `settings-sheet` to disappear (a fresh runtime opens no sheet) and then watches for
+  `write-error-banner`. The theme write after it is the relaunched runtime's first, and
+  `verifyPersistence`'s cold start is what proves it reached the file.
 - **Pointing the app at a local backend:** Settings → Server → `http://10.0.2.2:<port>` (the host
   from inside the emulator). Plain HTTP is allowed (`usesCleartextTraffic`).
 

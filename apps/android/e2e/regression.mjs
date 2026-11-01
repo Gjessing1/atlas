@@ -960,6 +960,44 @@ async function planTransitJourney(placeId) {
   await waitForId('transit-guidance', false);
 }
 
+/**
+ * A failed settings write shows `write-error-banner` for 8 s. Watch for it a
+ * little past the moment a write could still be landing.
+ */
+async function expectNoWriteError(label, watchMs = 6_000) {
+  const deadline = Date.now() + watchMs;
+  do {
+    const xml = hierarchy();
+    const banner = nodeForId(xml, 'write-error-banner');
+    if (banner || xml.includes('Saving setting failed')) {
+      const shown = banner
+        ? textsWithin(xml, boundsForNode(banner)).join(' ')
+        : 'Saving setting failed';
+      throw new Error(`${label}: ${shown}`);
+    }
+    await delay(1_000);
+  } while (Date.now() < deadline);
+}
+
+/**
+ * Restart through relaunchIntoUpdate, the path the update pill and Settings
+ * take, and leave the new runtime freshly started for the writes that follow.
+ * Its first writes used to lose to the old runtime's open connection with
+ * `database is locked` ("Saving setting failed"). The APK cannot be pointed at
+ * a test update server, so Settings' Restart app stands in for a staged update.
+ */
+async function restartThroughUpdateRelaunch() {
+  await openMenuItem('open-settings');
+  await waitForId('settings-sheet');
+  await tapAfterScroll('settings-open-system', 'settings-sheet');
+  await tapAfterScroll('app-restart', 'settings-sheet');
+  // The new runtime starts with no sheet open; a reload that never came would
+  // leave this one up.
+  await waitForId('settings-sheet', false, 30_000);
+  await waitForAppReady();
+  await expectNoWriteError('Startup after the update relaunch failed a write');
+}
+
 async function setDarkTheme() {
   await openMenuItem('open-settings');
   await tap('settings-open-appearance');
@@ -1167,8 +1205,13 @@ async function main() {
   await planRoadRoute(ids.folderId, ids.placeId);
   console.log('Android regression: transit planning and guidance hand-off');
   await planTransitJourney(ids.placeId);
+  console.log('Android regression: update relaunch, then settings written straight after it');
+  await restartThroughUpdateRelaunch();
   console.log('Android regression: persisted settings and saved-data restart');
+  // The first write of the relaunched runtime; verifyPersistence's cold start
+  // proves it reached the file.
   await setDarkTheme();
+  await expectNoWriteError('Saving the theme after the update relaunch failed');
   const trackId = await recordTrackId(ids.folderId);
   await verifyPersistence({ ...ids, trackId });
   console.log('Android regression: main search reveals saved folder and track');

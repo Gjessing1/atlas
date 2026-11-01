@@ -839,6 +839,15 @@ function UpdateSection() {
                     : 'Check for updates'}
               </Text>
             </Pressable>
+            {/* The update restart's own path, minus the update: the device
+                regression has no update server to stage one from. */}
+            <Pressable
+              style={[styles.button, styles.buttonQuiet]}
+              onPress={ota.restart}
+              testID="app-restart"
+            >
+              <Text style={styles.buttonQuietText}>Restart app</Text>
+            </Pressable>
             {ota.status === 'uptodate' ? <Text style={styles.muted}>Up to date.</Text> : null}
             {ota.status === 'error' ? <Text style={styles.muted}>Check failed.</Text> : null}
           </View>

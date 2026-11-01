@@ -20,7 +20,7 @@ export interface OtaUpdateState {
   status: OtaStatus;
   /** Check the server and download in one step; ends in 'ready' | 'uptodate' | 'error'. */
   check: () => void;
-  /** Relaunch into the downloaded bundle (status 'ready'). */
+  /** Relaunch into the downloaded bundle, or the running one when none is ready. */
   restart: () => void;
 }
 

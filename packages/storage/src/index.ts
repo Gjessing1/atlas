@@ -26,5 +26,7 @@ export {
 export { parseExportedData } from './records.js';
 export { MIGRATIONS, migrate } from './migrations.js';
 export { AtlasStorage, LOCAL_SETTING_PREFIX } from './storage.js';
+export { createConnectionDriver } from './connection-driver.js';
+export type { AsyncSqliteConnection, ConnectionDriverOptions } from './connection-driver.js';
 export { serializeDriver } from './serial-driver.js';
 export { createWorkerSqlDriver } from './worker-driver.js';

@@ -1,7 +1,5 @@
-import { AtlasStorage, serializeDriver } from '@atlas/storage';
-import type { SqlDriver, SqlRow } from '@atlas/storage';
+import { AtlasStorage, createConnectionDriver, serializeDriver } from '@atlas/storage';
 import { openDatabaseAsync } from 'expo-sqlite';
-import type { SQLiteBindValue } from 'expo-sqlite';
 
 /**
  * Open the persistent user-data database over the device's native SQLite
@@ -20,70 +18,41 @@ import type { SQLiteBindValue } from 'expo-sqlite';
  * settings quietly until `setSetting` started reporting failures, at which
  * point it started losing them loudly.
  *
- * The queue cannot exclude a connection it does not own, and one exists for a
- * moment on every OTA restart: `Updates.reloadAsync()` starts the new JS
- * runtime while the old one's connection is still open — sometimes reading.
- * In rollback-journal mode a single reader there fails our COMMIT with
- * `database is locked`, and the first write of every new version (the
- * last-run marker) lost exactly that race. So the file runs in WAL, where
- * readers never block a commit, with a busy timeout so an overlapping writer
- * is waited out rather than reported; and {@link releaseStorage} lets the
- * restart close our connection first, so it never outlives its runtime with a
- * half-run batch.
+ * The queue cannot exclude a connection it does not own, and the old runtime's
+ * is one on every OTA restart; {@link createConnectionDriver} carries the WAL,
+ * busy-timeout and retry answer to that. {@link releaseStorage} is the other
+ * half: the restart closes our connection first, so it never outlives its
+ * runtime with a half-run batch.
  */
 let live: AtlasStorage | null = null;
+let released = false;
+
+const RELEASED = 'User data is closed for an app restart';
 
 export async function openStorage(): Promise<AtlasStorage> {
+  // After a release the runtime is on its way out; a remount reopening here
+  // would hand the new runtime the very connection the release closed.
+  if (released) throw new Error(RELEASED);
   const db = await openDatabaseAsync('atlas.db');
-  // Busy timeout first: switching to WAL itself needs a moment alone with the
-  // file. A switch that still loses (a lock held past the timeout) leaves the
-  // old journal mode for this session — worth a retry next launch, not a
-  // database the app cannot open. WAL is persistent once it takes.
-  await db.execAsync('PRAGMA busy_timeout = 5000');
-  try {
-    await db.execAsync('PRAGMA journal_mode = WAL');
-  } catch {
-    // Retried on the next open; the busy timeout still covers this session.
+  if (released) {
+    await db.closeAsync();
+    throw new Error(RELEASED);
   }
-  const driver: SqlDriver = {
-    async query(sql, params = []) {
-      return db.getAllAsync<SqlRow>(sql, params as SQLiteBindValue[]);
-    },
-    async batch(statements) {
-      // Safe on the shared connection *because* the queue holds every other
-      // statement back: the interleaving expo's own `withTransactionAsync`
-      // warns about cannot arise when nothing else is allowed to run until this
-      // resolves. Spelled out rather than delegated to it for the rollback,
-      // which has to survive a failure that already ended the transaction —
-      // expo's version lets that second throw replace the first, so the caller
-      // is told "cannot rollback" instead of what actually went wrong.
-      await db.execAsync('BEGIN');
-      try {
-        for (const s of statements) {
-          await db.runAsync(s.sql, (s.params ?? []) as SQLiteBindValue[]);
-        }
-        await db.execAsync('COMMIT');
-      } catch (err) {
-        try {
-          await db.execAsync('ROLLBACK');
-        } catch {
-          // Some failures abort the transaction on their own; nothing to roll
-          // back, and the error worth reporting is the one below.
-        }
-        throw err;
-      }
-    },
-    async execScript(sql) {
-      await db.execAsync(sql);
-    },
-    async close() {
-      if (live === storage) live = null;
-      await db.closeAsync();
-    },
-  };
-  const storage = new AtlasStorage(serializeDriver(driver));
-  await storage.init();
+  const driver = await createConnectionDriver(db);
+  const storage = new AtlasStorage(
+    serializeDriver({
+      ...driver,
+      close: async () => {
+        if (live === storage) live = null;
+        await driver.close!();
+      },
+    }),
+  );
+  // Live before init, not after: a release that lands mid-migration must still
+  // close this connection. Its close queues behind the call in flight, and the
+  // rest of init then fails on the closed handle, which is the point.
   live = storage;
+  await storage.init();
   return storage;
 }
 
@@ -93,6 +62,7 @@ export async function openStorage(): Promise<AtlasStorage> {
  * dead afterwards, and nothing reopens it in this runtime.
  */
 export async function releaseStorage(): Promise<void> {
+  released = true;
   const storage = live;
   live = null;
   await storage?.close();
