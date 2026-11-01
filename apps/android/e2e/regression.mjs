@@ -604,6 +604,24 @@ async function replaceText(id, text, expectedText = text) {
   await waitFor(`${id} to contain ${expectedText}`, hierarchy, holds);
 }
 
+/**
+ * Wait for a node to hold still across two reads, and return that read. A
+ * sheet animates after its handle is tapped, and a tap read before it settles
+ * lands where its target *was*: on whatever slid under that spot (a folder
+ * row, which opens), or on nothing. A fresh runtime's sheet travels all the
+ * way from peek, long enough for the warm UiAutomator server to read
+ * mid-flight (2026-11-01).
+ */
+async function waitForSettled(id) {
+  let last = null;
+  return waitFor(`${id} to settle`, hierarchy, (xml) => {
+    const bounds = JSON.stringify(visibleNode(xml, id)?.bounds ?? null);
+    const settled = bounds !== 'null' && bounds === last;
+    last = bounds;
+    return settled;
+  });
+}
+
 async function openMenuItem(id) {
   await tap('open-menu');
   await waitForId('main-menu-sheet');
@@ -617,17 +635,7 @@ async function openCollectionsAtRoot() {
   await openMenuItem('open-favorites');
   await waitForId('favorites-sheet');
   await tap('favorites-sheet-handle');
-  // The handle animates the sheet up, and a tab tapped before it settles is
-  // tapped where it *was*: on whatever slid under that spot, a folder row,
-  // which opens it. A fresh runtime's sheet travels from peek, far enough
-  // for the warm UiAutomator server to read mid-flight (2026-11-01).
-  let last = null;
-  await waitFor('the Collections sheet to settle', hierarchy, (xml) => {
-    const bounds = JSON.stringify(visibleNode(xml, 'collections-view-folders')?.bounds ?? null);
-    const settled = bounds !== 'null' && bounds === last;
-    last = bounds;
-    return settled;
-  });
+  await waitForSettled('collections-view-folders');
   await tap('collections-view-folders');
   await waitForId('collections-back', false);
 }
@@ -1065,7 +1073,7 @@ async function verifyPersistence({ folderId, placeId, trackId }) {
   // are there, the track and the folder's label switch are inside it.
   await openMenuItem('open-favorites');
   await tap('favorites-sheet-handle');
-  let xml = await waitForId(`folder-row-${folderId}`);
+  let xml = await waitForSettled(`folder-open-${folderId}`);
   expectIds(xml, [`quick-place-${placeId}`]);
   if (!nodeForId(xml, `favorite-${placeId}`)) {
     throw new Error(`Saved place ${placeId} did not survive process restart`);
