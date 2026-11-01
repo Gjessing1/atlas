@@ -320,6 +320,19 @@ before that destination. Also:
   visible" with the field focused and present in `window.xml`; its screenshot showed Track name
   above the footer and the input below it. This was a harness visibility assumption, not a route
   or keyboard data error.
+- **A menu that just closed can hide the sheet under it for a read.** On 2026-11-01 the worker's
+  first run of v0.263.0 failed at `Cannot scroll missing collections-scroll`, right after
+  tapping Edit in a place row's long-press menu. The failure's own `window.xml` held
+  `collections-scroll` with normal bounds, the editor was open in `failure.png`, and logcat was
+  clean. The read straight after the tap still saw the closing menu.
+  The warm UiAutomator server reads in 0.6 s, where dump took 2.6 s, so the worker exposes races
+  that the local AVD never did. `tapAfterScroll` and `focusAfterScroll` now wait up to 10 s for a
+  missing scroller before they give up.
+- **Something else can hold the fixture server's port open.** On 2026-11-01 a finished worker run
+  sat in `run-regression.sh`'s cleanup for minutes: VS Code Remote's automatic port forwarding had
+  a dozen connections open to 127.0.0.1:3199 (`ss -tnp | grep 3199` names the holder), and
+  `server.close()` waits for every one. The fixture server now drops its connections when it
+  stops. If a run still hangs after `WORKER DONE`, kill the fixture server by its PID.
 - **The update relaunch is driven by Settings → System → Restart app** (`app-restart`). It takes
   `relaunchIntoUpdate`, the same path as the update pill, without a downloaded update, since the
   APK cannot be pointed at a test update server. `Updates.reloadAsync()` keeps the process, so the

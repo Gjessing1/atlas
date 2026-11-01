@@ -455,6 +455,18 @@ function swipeWithin(bounds, direction) {
   );
 }
 
+/**
+ * The scroller to swipe, waiting for it when this read missed it: a menu tapped
+ * just before (a row's long-press Edit) can still own the window for a read
+ * after it closes, and the warm UiAutomator server reads fast enough to see it.
+ */
+async function scrollerIn(xml, scrollerId) {
+  return (
+    visibleNode(xml, scrollerId) ??
+    visibleNode(await waitForId(scrollerId, true, 10_000), scrollerId)
+  );
+}
+
 async function tapAfterScroll(id, scrollerId, direction = 'up') {
   for (let attempt = 0; attempt < 12; attempt += 1) {
     const xml = hierarchy();
@@ -463,8 +475,7 @@ async function tapAfterScroll(id, scrollerId, direction = 'up') {
       tapBounds(target.bounds);
       return;
     }
-    const scroller = visibleNode(xml, scrollerId);
-    if (!scroller) throw new Error(`Cannot scroll missing ${scrollerId} to reach ${id}`);
+    const scroller = await scrollerIn(xml, scrollerId);
     swipeWithin(scroller.bounds, direction);
     await delay(400);
   }
@@ -506,8 +517,7 @@ async function focusAfterScroll(id, scrollerId, direction = 'up') {
       tapBounds(bounds);
       return;
     }
-    const scroller = visibleNode(xml, scrollerId);
-    if (!scroller) throw new Error(`Cannot scroll missing ${scrollerId} to reach ${id}`);
+    const scroller = await scrollerIn(xml, scrollerId);
     swipeWithin(scroller.bounds, direction);
     await delay(400);
   }

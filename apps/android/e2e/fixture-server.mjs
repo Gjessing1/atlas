@@ -403,6 +403,12 @@ server.listen(port, host, () => {
   console.log(`Atlas Android fixture server listening on http://${host}:${port}`);
 });
 
-const stop = () => server.close(() => process.exit(0));
+// close() alone waits for every open connection, and something else may hold
+// one forever: VS Code Remote's automatic port forwarding keeps sockets to
+// 3199 open, which left run-regression.sh's cleanup waiting on us indefinitely.
+const stop = () => {
+  server.close(() => process.exit(0));
+  server.closeAllConnections();
+};
 process.on('SIGINT', stop);
 process.on('SIGTERM', stop);
