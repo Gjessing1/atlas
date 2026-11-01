@@ -328,6 +328,12 @@ before that destination. Also:
   The warm UiAutomator server reads in 0.6 s, where dump took 2.6 s, so the worker exposes races
   that the local AVD never did. `tapAfterScroll` and `focusAfterScroll` now wait up to 10 s for a
   missing scroller before they give up.
+- **A tap read mid-animation lands where the target was.** Also on 2026-11-01: after the update
+  relaunch, `recordTrackId` timed out on `folder-open-…` with Collections open _inside_ the folder.
+  A fresh runtime's sheet travels from peek when its handle is tapped, and the Places-tab tap read
+  during that move hit the folder row that slid under the tab's old spot. `openCollectionsAtRoot`
+  now waits for the tab's bounds to hold still across two reads, then asserts the top level
+  (`collections-back` absent). Wait for a sheet to settle before tapping inside it.
 - **Something else can hold the fixture server's port open.** On 2026-11-01 a finished worker run
   sat in `run-regression.sh`'s cleanup for minutes: VS Code Remote's automatic port forwarding had
   a dozen connections open to 127.0.0.1:3199 (`ss -tnp | grep 3199` names the holder), and

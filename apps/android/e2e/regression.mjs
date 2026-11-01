@@ -617,7 +617,19 @@ async function openCollectionsAtRoot() {
   await openMenuItem('open-favorites');
   await waitForId('favorites-sheet');
   await tap('favorites-sheet-handle');
+  // The handle animates the sheet up, and a tab tapped before it settles is
+  // tapped where it *was*: on whatever slid under that spot, a folder row,
+  // which opens it. A fresh runtime's sheet travels from peek, far enough
+  // for the warm UiAutomator server to read mid-flight (2026-11-01).
+  let last = null;
+  await waitFor('the Collections sheet to settle', hierarchy, (xml) => {
+    const bounds = JSON.stringify(visibleNode(xml, 'collections-view-folders')?.bounds ?? null);
+    const settled = bounds !== 'null' && bounds === last;
+    last = bounds;
+    return settled;
+  });
   await tap('collections-view-folders');
+  await waitForId('collections-back', false);
 }
 
 /** Hold a row until its long-press fires: Collections keeps row actions there. */
