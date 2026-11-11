@@ -3,8 +3,8 @@
     "name": "Atlas",
     "slug": "atlas",
     "scheme": "atlas",
-    "version": "0.263.0",
-    "runtimeVersion": "24",
+    "version": "0.264.0",
+    "runtimeVersion": "25",
     "updates": {
       "url": "https://atlas.gjessing.io/api/app/manifest",
       "enabled": true,
@@ -16,7 +16,7 @@
     "userInterfaceStyle": "light",
     "android": {
       "package": "io.gjessing.atlas",
-      "versionCode": 36,
+      "versionCode": 37,
       "permissions": ["android.permission.POST_NOTIFICATIONS"],
       "intentFilters": [
         {
@@ -30,6 +30,15 @@
               "path": "/"
             }
           ]
+        },
+        {
+          "action": "VIEW",
+          "category": ["BROWSABLE", "DEFAULT"],
+          "data": [{ "scheme": "geo" }, { "scheme": "google.navigation" }]
+        },
+        {
+          "action": "MAIN",
+          "category": ["APP_MAPS"]
         }
       ],
       "adaptiveIcon": {

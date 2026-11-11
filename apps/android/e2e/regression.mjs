@@ -340,6 +340,38 @@ async function closeQuickLayerMenu() {
   await waitForId('layer-quick-backdrop', false);
 }
 
+/**
+ * Another app's "show on map": a `geo:` URI, resolved the way Android resolves
+ * it. Restricted to this package (`-p`) but not to a component, so it is still
+ * the manifest's intent filter that has to match — `am start` exits 0 either
+ * way and says so only in its output. Fired at the running app, which is the
+ * common case for a default map app and goes through `onNewIntent`.
+ */
+async function verifyGeoHandOff() {
+  const started = shell(
+    'am',
+    'start',
+    '-W',
+    '-a',
+    'android.intent.action.VIEW',
+    '-p',
+    PACKAGE,
+    '-d',
+    `'geo:0,0?q=${ORIGIN_LAT},${ORIGIN_LNG}(Hytta)'`,
+  );
+  if (/Error|unable to resolve/i.test(started)) {
+    throw new Error(`Atlas does not accept geo: links: ${started}`);
+  }
+  const xml = await waitFor(
+    'the geo: link to open its place card',
+    readWindow,
+    (value) => Boolean(nodeForId(value, 'destination-sheet')) && value.includes('text="Hytta"'),
+  );
+  if (!xml.includes(`package="${PACKAGE}"`)) throw new Error('geo: link left Atlas');
+  await tap('destination-cancel');
+  await waitForId('destination-sheet', false);
+}
+
 async function verifyPoiCategoryDock() {
   await tap('layer-quick-toggle');
   // Search and its IME are a separate, opt-in check. This scenario is about
@@ -1216,6 +1248,9 @@ async function main() {
   shell('am', 'start', '-W', '-n', `${PACKAGE}/.MainActivity`);
   let xml = await waitForAppReady();
   expectIds(xml, ['search-open', 'map-profile-toggle', 'layer-quick-toggle', 'locate']);
+
+  console.log('Android regression: geo: hand-off from another app');
+  await verifyGeoHandOff();
 
   // Before the fixture, which serves an empty layer catalog: the Layers button
   // only exists while the catalog does, so the built-in POI switch is out of

@@ -373,10 +373,30 @@ function AppInner() {
 
   // Every picked point — map tap, long-press, search hit, favorite, link pin.
   const dest = useDestination(flyTo);
-  const { pickPoint } = dest;
+  const { pickPoint, pickQuiet } = dest;
   // A pin carried by a launch/deep link opens its card; the camera is already
   // on its way there from the link's own view, so it must not fly again.
-  const onLinkPin = useCallback((pin: LatLng) => pickPoint(pin, false), [pickPoint]);
+  // A `geo:` hand-off may name its point ("Fars hytte"); the card then opens
+  // under that name rather than under the coordinates.
+  const onLinkPin = useCallback(
+    (pin: LatLng, label?: string) => {
+      if (label) pickQuiet({ lat: pin.lat, lng: pin.lng, name: label, canSave: true });
+      else pickPoint(pin, false);
+    },
+    [pickPoint, pickQuiet],
+  );
+  // Another app handed over an address instead of a position (a contact's
+  // street address, a calendar location): open search on it, as if typed.
+  const [linkQuery, setLinkQuery] = useState<string | null>(null);
+  const onLinkQuery = useCallback((query: string) => {
+    setLinkQuery(query);
+    setSearchOpen(true);
+  }, []);
+  // The handed-over text belongs to that one opening of search; however it
+  // closes, the next opening starts empty.
+  useEffect(() => {
+    if (!searchOpen) setLinkQuery(null);
+  }, [searchOpen]);
   // With the weather sheet open, picking or dragging a pin re-aims the forecast.
   // Placing a pin somewhere is the user pointing at a place; leaving the sheet
   // describing the previous one is simply the wrong answer. Only while it is
@@ -402,7 +422,7 @@ function AppInner() {
     setWeatherTarget((cur) => (cur ? { lat: pickedLat, lng: pickedLng } : cur));
   }, [pickedLat, pickedLng]);
   // Where the map opens, where it is now, and remembering that for next launch.
-  const camera = useBootCamera(data, cameraRef, onLinkPin);
+  const camera = useBootCamera(data, cameraRef, onLinkPin, onLinkQuery);
   const { initialView, viewRef, mapZoom, getBias } = camera;
   const currentExploreArea = useMemo<ExploreArea | null>(() => {
     if (!camera.mapViewport) return null;
@@ -1638,6 +1658,10 @@ function AppInner() {
                 }
               }}
               onClose={() => setSearchOpen(false)}
+              // Keyed so a second hand-off while search is open starts over
+              // with the new text instead of being ignored.
+              key={linkQuery ?? 'search'}
+              initialQuery={linkQuery ?? undefined}
               bottomInset={bottomInset}
               getSetting={data.getSetting}
               setSetting={data.setSetting}

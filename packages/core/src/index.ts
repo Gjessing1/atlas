@@ -16,6 +16,7 @@ export * from './coverage.js';
 export * from './format.js';
 export * from './explore.js';
 export * from './geo.js';
+export * from './geolink.js';
 export * from './inatur.js';
 export * from './layers.js';
 export * from './maphash.js';

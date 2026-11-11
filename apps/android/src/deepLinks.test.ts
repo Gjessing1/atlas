@@ -56,3 +56,39 @@ describe('https intent filter', () => {
     expect(httpsLinks).toHaveLength(1);
   });
 });
+
+describe('map hand-off intent filter', () => {
+  // Android has no "default maps app" setting: the default is whichever app the
+  // user picks "Always" for when another app fires one of these schemes. An app
+  // that does not claim them is never in that list.
+  const handOff = filters.filter((filter) =>
+    (filter.data ?? []).some((data) => data.scheme === 'geo'),
+  );
+
+  it('claims geo: and the navigation scheme, as a browsable default view', () => {
+    expect(handOff).toHaveLength(1);
+    const [filter] = handOff;
+    expect(filter!.action).toBe('VIEW');
+    // DEFAULT is what makes an implicit startActivity() resolve to it at all.
+    expect(filter!.category).toEqual(expect.arrayContaining(['BROWSABLE', 'DEFAULT']));
+    expect((filter!.data ?? []).map((data) => data.scheme).sort()).toEqual([
+      'geo',
+      'google.navigation',
+    ]);
+  });
+
+  it('does not ask Android to verify a scheme that has no domain', () => {
+    // autoVerify is a promise about a web host (assetlinks.json); these schemes
+    // have none, and the https App Link's verification should stay about
+    // exactly one host.
+    expect(handOff[0]!.autoVerify).toBeUndefined();
+  });
+
+  it('declares itself a maps app to launchers and assistants', () => {
+    expect(
+      filters.some(
+        (filter) => filter.action === 'MAIN' && (filter.category ?? []).includes('APP_MAPS'),
+      ),
+    ).toBe(true);
+  });
+});

@@ -31,6 +31,7 @@ export function SearchBar({
   getBias,
   onPick,
   onClose,
+  initialQuery,
   bottomInset = 0,
   getSetting,
   setSetting,
@@ -44,6 +45,8 @@ export function SearchBar({
   getBias: SearchBias;
   onPick: (result: MainSearchResult) => void;
   onClose: () => void;
+  /** Text to open with, already searched — an address another app handed over. */
+  initialQuery?: string;
   /** System nav-bar inset — supplied with Atlas's zero-inset fallback. */
   bottomInset?: number;
   /** Settings accessors, for the persisted recent-searches list. */
@@ -70,6 +73,13 @@ export function SearchBar({
       [getSetting, setSetting],
     ),
   );
+
+  // Once, on mount: the text is a starting point the user may then edit.
+  const opening = useRef(initialQuery);
+  const { setQuery } = search;
+  useEffect(() => {
+    if (opening.current) setQuery(opening.current);
+  }, [setQuery]);
 
   const close = useCallback(() => {
     // Blur the native owner before React removes it. Keyboard.dismiss() alone
