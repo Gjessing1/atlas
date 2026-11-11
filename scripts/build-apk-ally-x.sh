@@ -7,7 +7,7 @@ if [ -f "$HOME/android-sdk/env.sh" ]; then
   # shellcheck disable=SC1091
   source "$HOME/android-sdk/env.sh"
 fi
-client="${ALLY_X_JOB_CLIENT:-/home/gjessing/projects/sysadmin/ally-x-worker/bin/ally-x-job}"
+client="${ALLY_X_JOB_CLIENT:-/home/gjessing/projects/tooling/sysadmin/ally-x-worker/bin/ally-x-job}"
 sdk="${ANDROID_HOME:-/home/gjessing/android-sdk}"
 keystore_env="${ATLAS_KEYSTORE_ENV:-$HOME/.config/atlas/keystore.env}"
 [[ -r "$keystore_env" ]] || { echo "missing release signing config: $keystore_env" >&2; exit 1; }

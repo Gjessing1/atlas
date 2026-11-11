@@ -459,7 +459,7 @@ Work done on the host or in the release pipeline rather than in the code.
         `compat`, no `provenance`) until they are next rebuilt.
 
 - [ ] **Run CPU-bound batch jobs on the Ally-X worker — first-time and refresh tile builds.**
-      The Windows worker (`~/projects/sysadmin/ally-x-worker`, 8 cores / 16 threads, WHPX)
+      The Windows worker (`~/projects/tooling/sysadmin/ally-x-worker`, 8 cores / 16 threads, WHPX)
       already takes the Android regression from SOYO, behind a health check, a one-session lock
       and a "fall back only before anything ran" rule. Planetiler is the next customer:
       `build-basemap.sh` caps it at 2 of SOYO's 4 cores and 6 GB, so a first build (Great

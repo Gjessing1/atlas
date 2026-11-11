@@ -18,7 +18,7 @@ sdk_root="${ANDROID_HOME:-$HOME/android-sdk}"
 adb="${ADB:-$sdk_root/platform-tools/adb}"
 apk=""
 backend="${ATLAS_ANDROID_BACKEND:-auto}"
-worker="${ATLAS_ANDROID_WORKER:-$HOME/projects/sysadmin/ally-x-worker/bin/ally-x-android}"
+worker="${ATLAS_ANDROID_WORKER:-$HOME/projects/tooling/sysadmin/ally-x-worker/bin/ally-x-android}"
 # A worker session exits 75 when the worker was unusable before anything ran on it.
 worker_unavailable=75
 

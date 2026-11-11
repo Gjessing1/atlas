@@ -31,7 +31,7 @@ script rebuilt an identical APK, 10 min apiece.
 
 `run-regression.sh` (and so every publish script) first offers the run to the **Ally-X worker**.
 That is a Windows 11 handheld on the LAN with 8 cores, WHPX and a real GPU, shared by every
-project on this host through `~/projects/sysadmin/ally-x-worker` (its README covers setup,
+project on this host through `~/projects/tooling/sysadmin/ally-x-worker` (its README covers setup,
 design and troubleshooting). Only the emulator runs there. `regression.mjs` and the fixture
 server stay here and drive it through SSH forwards. Adb, `adb emu` and `10.0.2.2:3199` behave
 as with a local AVD, so the scenario code does not know which backend it got.
