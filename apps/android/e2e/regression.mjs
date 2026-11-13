@@ -7,7 +7,11 @@ import { spawnSync } from 'node:child_process';
 
 const PACKAGE = 'io.gjessing.atlas';
 const EXPECTED_AVD = 'atlas_test';
-const FIXTURE_ORIGIN = 'http://10.0.2.2:3199';
+const fixturePort = Number(process.env.ATLAS_E2E_PORT ?? 3199);
+if (!Number.isInteger(fixturePort) || fixturePort < 1 || fixturePort > 65535) {
+  throw new Error('ATLAS_E2E_PORT must be an integer from 1 to 65535');
+}
+const FIXTURE_ORIGIN = `http://10.0.2.2:${fixturePort}`;
 const sdkRoot = process.env.ANDROID_HOME ?? join(homedir(), 'android-sdk');
 const adb = process.env.ADB ?? join(sdkRoot, 'platform-tools', 'adb');
 const artifactsDir = resolve(import.meta.dirname, 'artifacts');

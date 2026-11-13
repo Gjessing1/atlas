@@ -109,3 +109,52 @@ Planner geometry trap (2026-10-30): after Undo reframes a route, its first marke
 the elevation panel. A timed-out marker click whose call log says the profile SVG intercepts
 pointer events is an occluded map target. Close the profile before choosing that point, as a
 user must; do not force-click through the panel or change route logic for the test.
+
+## Screenshot review tour (responsive web)
+
+`apps/web/scripts/play-review*.mjs` mirrors the Android review runner, tour, interaction helpers
+and report adapter. Both use `scripts/screenshot-review-report.mjs` for the artifact format.
+It captures a **running Atlas web app**; it does not start or stop a server. The default origin
+is the local deployed backend, `http://127.0.0.1:3100`; `--url` chooses another Atlas origin and
+checks `/api/health` before running. To review local source, start the production-shaped server
+above on a free port, e.g. `E2E_PORT=3198 sh apps/web/e2e/serve.sh`, and use `--url` for that port.
+Never kill an unrelated process using the default test port.
+
+Run in the same matching Playwright container as the suite, with a writable artifact mount:
+
+```sh
+node apps/web/scripts/play-review.mjs --list   # no browser needed
+
+docker run --rm --network host \
+  -v "$PWD":/work -v /tmp:/reviews -w /work \
+  -u "$(id -u):$(id -g)" -e HOME=/tmp \
+  mcr.microsoft.com/playwright:v1.61.1-noble \
+  node apps/web/scripts/play-review.mjs --tour --size phone,tablet,desktop \
+  --out /reviews/atlas-web-review
+```
+
+Use a new/empty output folder each time. `--only Collections,Settings` selects tour areas;
+`--screen Map/place` selects one recipe. `--size all` includes `phone-small` 360×640,
+`phone` 390×844, `tablet` 800×1280 and `desktop` 1440×1000, all CSS pixels at DPR 1.
+The default size is desktop. `--landscape` swaps portrait viewport dimensions. This is responsive
+Chromium, not a real mobile browser/keyboard. The tour opens panels and tabs without saving
+settings; every recipe gets a fresh browser context with one page, an empty OPFS library, no
+account, light theme, en-GB locale and Europe/Oslo timezone. It never reads a personal browser
+profile. Live backend data is used without mocks; review captures can therefore vary over time.
+
+Outputs: PNGs by area, offline `index.html` with search/size filters, `manifest.json` with recipes,
+viewports, dimensions, SHA-256, capture times, deployed commit, browser version, browser errors
+and map readiness, plus `REVIEW.md` with context, limits and review prompts. Fonts and initial
+map readiness are awaited with bounded timeouts, then screenshots wait for three identical
+frames (caret hidden and finite CSS animations finished). A changing/unfinished screen is
+flagged as unsettled, not quietly treated as a complete render. No screenshot proves all APIs
+finished or an operation works. `--compare` remains planned.
+
+Failures return nonzero and preserve a partial report, `<screen>.failed.png` where possible and
+`failure.txt`; inspect those before retrying. SIGINT/SIGTERM stop at the next boundary, close
+the browser and retain the report. The first tour covers map/pin, search, Collections' three
+views, Explore, destination-only planner, layer catalog and Settings. Populated library,
+signed-in, dark theme and running navigation variants remain outside this first tour.
+
+Review locator trap (2026-11-13): the search input is `type="search"`, whose implicit role is
+`searchbox`, not `textbox`. Use its accessible label (`Search places`) in review steps.

@@ -21,6 +21,13 @@ backend="${ATLAS_ANDROID_BACKEND:-auto}"
 worker="${ATLAS_ANDROID_WORKER:-$HOME/projects/tooling/sysadmin/ally-x-worker/bin/ally-x-android}"
 # A worker session exits 75 when the worker was unusable before anything ran on it.
 worker_unavailable=75
+fixture_port="${ATLAS_E2E_PORT:-3199}"
+if [[ ! "$fixture_port" =~ ^[1-9][0-9]{0,4}$ ]] || ((fixture_port > 65535)); then
+  echo "ATLAS_E2E_PORT must be an integer from 1 to 65535" >&2
+  exit 2
+fi
+export ATLAS_E2E_PORT="$fixture_port"
+fixture_health="http://127.0.0.1:$fixture_port/api/health"
 
 while (($#)); do
   case "$1" in
@@ -120,14 +127,14 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-if curl --silent --fail http://127.0.0.1:3199/api/health >/dev/null 2>&1; then
-  echo "port 3199 is already in use; refusing to test against a server this run does not own" >&2
+if curl --silent --fail "$fixture_health" >/dev/null 2>&1; then
+  echo "port $fixture_port is already in use; refusing to test against a server this run does not own" >&2
   exit 1
 fi
 node "$app_dir/e2e/fixture-server.mjs" >"$fixture_log" 2>&1 &
 fixture_pid=$!
 for _ in $(seq 1 40); do
-  if curl --silent --fail http://127.0.0.1:3199/api/health >/dev/null 2>&1; then
+  if curl --silent --fail "$fixture_health" >/dev/null 2>&1; then
     break
   fi
   if ! kill -0 "$fixture_pid" 2>/dev/null; then
@@ -137,7 +144,7 @@ for _ in $(seq 1 40); do
   fi
   sleep 0.25
 done
-if ! curl --silent --fail http://127.0.0.1:3199/api/health >/dev/null; then
+if ! curl --silent --fail "$fixture_health" >/dev/null; then
   echo "fixture server did not become ready" >&2
   exit 1
 fi
@@ -148,7 +155,7 @@ fi
 if [[ "$backend" != local && -x "$worker" ]]; then
   echo "Android regression backend: trying ally-x"
   set +e
-  "$worker" session --avd atlas_test --apk "$apk" --reverse 3199 --uiautomator2 \
+  "$worker" session --avd atlas_test --apk "$apk" --reverse "$fixture_port" --uiautomator2 \
     --results "$app_dir/e2e/artifacts/ally-x" -- node "$app_dir/e2e/regression.mjs"
   worker_status=$?
   set -e

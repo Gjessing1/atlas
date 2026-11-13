@@ -366,3 +366,103 @@ A failed run writes `apps/android/e2e/artifacts/`: `failure.png`, `failure.txt` 
 last window dump), `window.xml`, `logcat.txt`, `activity.txt`, `emulator.log` and
 `fixture-server.log`. The directory is wiped at the start of the next run, so copy anything you
 need first.
+
+## Screenshot review tour (native Android)
+
+The Iris-style review harness lives in `apps/android/scripts/play-review*.mjs`: runner,
+independent screen definitions, native interaction helpers and report adapter. Atlas is React
+Native, so it uses existing `testID` controls through ADB/UiAutomator instead of WebView DevTools.
+It drives an **already running `atlas_test` emulator with Atlas installed**; it never boots an
+AVD, builds/installs an APK, clears app data or changes the saved server/account/theme. Existing
+library data and live services appear in captures. Use a disposable review emulator/library;
+the normal release regression is separate and clears its app data.
+
+```sh
+node apps/android/scripts/play-review.mjs --list
+node apps/android/scripts/play-review.mjs --tour --size phone --out /tmp/atlas-review
+node apps/android/scripts/play-review.mjs --tour --size phone,tablet --out /tmp/atlas-review-wide
+node apps/android/scripts/play-review.mjs --tour --only Collections,Settings --size tablet --landscape --out /tmp/atlas-review-settings
+node apps/android/scripts/play-review.mjs --screen Map/place --probe --out /tmp/atlas-review-probe
+```
+
+Read this runbook before driving the device. Follow the quiet-host/swap advice above and prefer
+`swangle` for map labels. Do not share the emulator with Iris, regression, manual ADB or another
+review run. The runner rejects known competing Node Android drivers, pins the selected serial
+(`--serial`, default `ANDROID_SERIAL` or `emulator-5554`), checks the AVD name, and takes
+`/tmp/atlas-review-<serial>.lock`. A stale lock names its PID: confirm the process is gone before
+removing that lock. This is a review-runner lock, not a universal device reservation.
+
+Profiles: `phone-small` 360×640 dp, `phone` about 411×914 dp, `phone-large` 448×997 dp,
+`tablet` 800×1280 dp. `--size all` captures all four. The default is `phone`; `--landscape`
+captures the selected recipes in landscape. Size/density overrides and rotation settings are
+saved before changes and restored on normal exit, failures, SIGINT and SIGTERM; SIGKILL or a
+lost emulator cannot be cleaned up. `manifest.json.originalDisplay` records recovery values.
+The app is force-stopped on exit. Screen recipes cold-launch it independently to avoid leaving
+a backdrop or sheet from the previous capture. They open surfaces and tabs without saving edits.
+
+Every run requires a new/empty output folder to prevent stale captures masquerading as current
+ones. It produces PNGs and UI hierarchy XML by area, `manifest.json` (recipes, dimensions,
+SHA-256, capture times, installed APK version, harness checkout, gaps), an offline `index.html`
+gallery with search/size filters, and `REVIEW.md` with context, limits and per-area review prompts.
+The APK version can differ from an installed OTA; the report does not claim they match. Each
+capture waits for controls to hold their bounds and for three identical frames, bounded to
+12 retries. Moving content is retained with `settled: false`, visibly flagged in the gallery.
+This is not a network-completion assertion or a pixel comparison.
+
+A failed recipe writes `<screen>.failed.png`, `<screen>.failed.xml` where possible and
+`failure.txt`, returns nonzero, and retains a partial report (including not-reached screens).
+Read these against the failure shapes above before changing code or rerunning. System dialogs
+are left visible as evidence rather than hidden automatically. Do not confuse a missing map
+symbol under SwiftShader with an absent React Native control.
+
+The first tour covers the idle map/menu, picked place, search with keyboard, Collections' three
+views, Explore categories, a destination-only planner, layer catalog and Settings sections.
+It does not seed populated variants or drive navigation, widgets, downloads, account changes or
+destructive actions. `--compare` remains planned. Web has the matching runner documented in
+`apps/web/e2e/README.md`.
+
+Review setup trap (2026-11-13): a regression-used AVD still pointed at `10.0.2.2:3199`
+when another app had taken that port. React Native controls and an old saved route drew over
+an otherwise blank map. Before a visual review, check Settings → System → Server and reset
+it to the intended live Atlas server; also check that the basemap layer is enabled. Settled
+pixels alone cannot distinguish a loaded map from an unavailable service. The review runner
+preserves that choice instead of silently repointing the app.
+
+Shared-port trap (2026-11-13): port 3199 belonged to Nodecal, not an Atlas test server.
+Do not stop it to publish Atlas. The regression now carries the fixture server's existing
+`ATLAS_E2E_PORT` setting through its readiness checks, emulator origin and worker forwards:
+`ATLAS_E2E_PORT=3198 ATLAS_ANDROID_BACKEND=ally-x infrastructure/packs/publish-update.sh`.
+The default remains 3199; the selected port must be free. Check for a listener first.
+
+Worker APK trap (2026-11-13): `build-apk-ally-x.sh` failed in
+`:valhalla:buildCMakeRelWithDebInfo[arm64-v8a]` because the worker has only x86_64 Valhalla
+prebuilts while that library module explicitly builds both 64-bit ABIs. This is separate from
+app JS or the review runner. Until worker/module ABI selection is aligned, build the candidate
+locally with `apps/android/build-apk.sh`; do not retry the identical remote build.
+
+The review helpers also accept `UIAUTOMATOR2_URL` from the existing Ally-X session wrapper,
+using its warm hierarchy reader and releasing that session on exit; a failed server falls back
+to ADB dumps. Local runs need no server. To capture on the worker with its real GPU:
+
+```sh
+~/projects/tooling/sysadmin/ally-x-worker/bin/ally-x-android session \
+  --avd atlas_test --uiautomator2 --results /tmp/atlas-review-worker-logs -- \
+  node apps/android/scripts/play-review.mjs --tour --size phone,tablet --out /tmp/atlas-worker-review
+```
+
+Use the installed review app or the wrapper's `--apk` option, and configure that emulator's
+server before the tour as on a local AVD. Do not start another driver in the same session.
+
+Warm-reader lifecycle trap (2026-11-13): deleting its Appium session can stop the instrumentation
+server. A setup script that uses the review helpers and closes that session must not then expect
+a second helper instance to reuse the same URL. Do setup in a separate worker session, or use
+ADB dumps for setup and reserve the warm reader for the tour. The tour itself uses one helper
+instance throughout; it falls back to dumps if a supplied server has already stopped.
+
+Planner persistence trap (2026-11-13): cold launch restores an unfinished route plan, so it does
+not guarantee an idle map. After the planner capture, later recipes timed out on `open-menu`
+while a correct restored Route sheet covered it. Launch preparation now closes `route-close`
+through the UI before waiting for the map controls. This dismisses a pre-existing unsaved draft
+on the dedicated review AVD too; use a disposable review state. Opening/closing panels and
+moving the map can persist normal UI state even though no library records or account/theme/
+server settings are edited. Library fixtures are not cleared or seeded.

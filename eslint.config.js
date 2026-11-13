@@ -32,8 +32,18 @@ export default tseslint.config(
   },
   {
     // Plain-node scripts (build tooling in scripts/, infrastructure/packs/*.mjs).
-    files: ['scripts/**/*.mjs', 'infrastructure/**/*.mjs', 'apps/android/e2e/**/*.mjs'],
+    files: [
+      'scripts/**/*.mjs',
+      'infrastructure/**/*.mjs',
+      'apps/android/e2e/**/*.mjs',
+      'apps/android/scripts/**/*.mjs',
+      'apps/web/scripts/**/*.mjs',
+    ],
     languageOptions: { globals: globals.node },
+  },
+  {
+    files: ['apps/web/scripts/play-review-steps.mjs', 'apps/web/scripts/play-review.mjs'],
+    languageOptions: { globals: { ...globals.node, ...globals.browser } },
   },
   {
     // Expo config plugins (prebuild) and the Metro config run in node as CommonJS.

@@ -403,6 +403,10 @@ preserved is in ARCHITECTURE.md → *What stays as it is*.
 
 ### 4.4 Test & release infrastructure
 
+- [ ] **Changed-screen comparison for Android and web reviews.** Add `--compare <previous review>`
+      to flag screens whose pixels changed, matching screens by stable identity, size and
+      orientation. Account explicitly for dynamic map, clock and live-service content.
+
 - [ ] **Make a failed CI build impossible to miss.** Add a loud post-deploy smoke step that checks
       the container's `/api/health` `gitSha` against the pushed commit and calls every route added by
       the release on the deployed origin. Keep route dependencies in the parity checklist so a
@@ -438,6 +442,12 @@ preserved is in ARCHITECTURE.md → *What stays as it is*.
 ### 4.7 Host and release chores
 
 Work done on the host or in the release pipeline rather than in the code.
+
+- [ ] **Align the Ally-X APK build's Valhalla ABIs with its x86_64 candidate.** The worker
+      requests x86_64, but the Valhalla library module still builds ARM64 too and fails on its
+      missing `valhalla-arm64-v8a/lib/libvalhalla.a`. Respect the candidate ABI selection or
+      provision the matching prebuilts; keep release signing on this host. Until then, use the
+      local APK builder. Failure details are in `apps/android/e2e/README.md`.
 
 - [ ] **Give Atlas the same stable APK download URL as the other apps.** Add
       `/api/app/download`, serving the APK named by `/data/app/version.json` with the Android APK
